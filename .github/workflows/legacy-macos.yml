@@ -1,0 +1,43 @@
+# Fork-only: builds the legacy (macOS 12–14) app on demand. Not part of the upstream PR.
+name: Legacy macOS build
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch to build"
+        default: macos-12-support
+      target:
+        description: "macOS deployment target"
+        type: choice
+        options: ["12.0", "13.0", "14.0"]
+        default: "12.0"
+
+jobs:
+  legacy:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - run: brew install xcodegen
+      - run: scripts/build-legacy.sh ${{ inputs.target }}
+      - if: failure()
+        run: grep -E "error:" NotchBuddy/build/legacy.log | sort -u | head -300
+      - run: cd NotchBuddy/build/Build/Products/Release && ditto -c -k --keepParent Coucou.app Coucou-macOS-${{ inputs.target }}.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Coucou-macOS-${{ inputs.target }}-plus
+          path: NotchBuddy/build/Build/Products/Release/Coucou-macOS-${{ inputs.target }}.zip
+
+  # The shims must not break the normal macOS 15 build.
+  default:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - run: brew install xcodegen && cd NotchBuddy && xcodegen
+      - run: |
+          xcodebuild -project NotchBuddy/NotchBuddy.xcodeproj -scheme NotchBuddy \
+            -configuration Debug build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
