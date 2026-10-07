@@ -22,6 +22,8 @@ final class IslandWindowController: NSWindowController {
     private var fullscreenSpace = false
     private var fullscreenRevealed = false
     private var hiddenForFullscreen = false
+    private var fullscreenOrderTask: Task<Void, Never>?
+    private var fullscreenRecheckTick = 0
     private var lastScreen: NSScreen?
 
     // Confused recovery timer (set by handleDizzy)
@@ -364,12 +366,14 @@ final class IslandWindowController: NSWindowController {
         let primaryH = NSScreen.screens.first?.frame.height ?? screen.frame.height
         let f = screen.frame
         let target = CGRect(x: f.minX, y: primaryH - f.maxY, width: f.width, height: f.height)  // CG coords
-        let me = ProcessInfo.processInfo.processIdentifier
+        // Only the active app's windows count: a big window of a background app isn't fullscreen.
+        guard let front = NSWorkspace.shared.frontmostApplication?.processIdentifier,
+              front != ProcessInfo.processInfo.processIdentifier else { fullscreenSpace = false; return }
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]] ?? []
         fullscreenSpace = windows.contains { w in
             guard (w[kCGWindowLayer as String] as? Int) == 0,
-                  (w[kCGWindowOwnerPID as String] as? Int).map(pid_t.init) != me,
+                  (w[kCGWindowOwnerPID as String] as? Int).map(pid_t.init) == front,
                   let bounds = w[kCGWindowBounds as String] as? NSDictionary,
                   let rect = CGRect(dictionaryRepresentation: bounds) else { return false }
             return rect.minX <= target.minX + 2 && rect.minY <= target.minY + 2
@@ -394,7 +398,36 @@ final class IslandWindowController: NSWindowController {
         }
         if hide != hiddenForFullscreen {
             hiddenForFullscreen = hide
-            if hide { panel.orderOut(nil) } else { panel.orderFrontRegardless() }
+            fullscreenOrderTask?.cancel()
+            if hide {
+                // SwiftUI slides the island up under the screen edge; the window is ordered out
+                // only once that's done (0 % CPU), and not at all if it comes back meanwhile.
+                panel.ignoresMouseEvents = true
+                state.fullscreenHidden = true
+                fullscreenOrderTask = Task { @MainActor [weak self, weak panel] in
+                    try? await Task.sleep(nanoseconds: 600_000_000)
+                    guard !Task.isCancelled, self?.hiddenForFullscreen == true else { return }
+                    panel?.orderOut(nil)
+                }
+            } else if panel.isVisible {
+                state.fullscreenHidden = false   // mid-hide: the spring turns around from where it is
+            } else {
+                panel.orderFrontRegardless()
+                // One frame in the hidden pose, then slide in.
+                fullscreenOrderTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 20_000_000)
+                    guard !Task.isCancelled, self?.hiddenForFullscreen == false else { return }
+                    self?.state.fullscreenHidden = false
+                }
+            }
+        }
+        // Never stay hidden on a stale answer: re-check the space every second while it matters.
+        if fullscreenSpace || hiddenForFullscreen {
+            fullscreenRecheckTick += 1
+            if fullscreenRecheckTick >= 60 {
+                fullscreenRecheckTick = 0
+                refreshFullscreenSpace()
+            }
         }
         if !hide, let screen = panel.screen { lastScreen = screen }
         return hide

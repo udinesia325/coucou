@@ -383,6 +383,9 @@ final class AppState: ObservableObject {
         DispatchQueue.global().asyncAfter(deadline: .now() + 3600, execute: work)
     }
 
+    /// The menu bar is hidden by a fullscreen app: the island slides away with it.
+    @Published var fullscreenHidden = false
+
     /// A Pomodoro focus or break is running (keeps the compact island up, shows the clock).
     @Published var focusRunning = false
 

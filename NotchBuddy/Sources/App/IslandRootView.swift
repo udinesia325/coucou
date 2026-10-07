@@ -141,6 +141,15 @@ struct IslandContainer: View {
             .animation(.easeInOut(duration: 0.25), value: state.spotifyLyricRow)
         }
         .frame(width: islandWidth, height: islandHeight, alignment: .topLeading)
+        // Fullscreen apps: slide up under the screen edge with the menu bar and back down.
+        // Springs keep their velocity when reversed, so fast space switching never jumps.
+        .scaleEffect(state.fullscreenHidden ? 0.9 : 1, anchor: .top)
+        .offset(y: state.fullscreenHidden ? -(islandHeight + 14) : 0)
+        .opacity(state.fullscreenHidden ? 0 : 1)
+        .animation(state.fullscreenHidden
+                   ? .spring(response: 0.32, dampingFraction: 1)
+                   : .spring(response: 0.46, dampingFraction: 0.78),
+                   value: state.fullscreenHidden)
         .onChangeCompat(of: state.mode) { oldMode, newMode in
             let shrinking = modeOrder(newMode) < modeOrder(oldMode)
             let anim = shrinking ? closeEase : openSpring
