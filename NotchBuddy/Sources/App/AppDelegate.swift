@@ -45,6 +45,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(withTitle: "Open Coucou", action: #selector(openIsland), keyEquivalent: "")
         menu.addItem(.separator())
+        let hideItem = menu.addItem(withTitle: "Hide with the menu bar", action: #selector(toggleHideWithMenuBar), keyEquivalent: "")
+        hideItem.state = AppState.shared.hideWithMenuBar ? .on : .off
+        hideWithMenuBarItem = hideItem
+        menu.delegate = self
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -53,6 +58,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Actions
+
+    private var hideWithMenuBarItem: NSMenuItem?
+
+    /// Off = "always show": the island stays on every window, fullscreen or not.
+    @objc private func toggleHideWithMenuBar() {
+        AppState.shared.hideWithMenuBar.toggle()
+        hideWithMenuBarItem?.state = AppState.shared.hideWithMenuBar ? .on : .off
+    }
 
     @objc private func openIsland() {
         islandController?.expand(to: .overview)
@@ -128,5 +141,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #if !APPSTORE
         _ = MusicController.shared
         #endif
+    }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    /// Settings can change the option too: refresh the check mark each time the menu opens.
+    func menuWillOpen(_ menu: NSMenu) {
+        hideWithMenuBarItem?.state = AppState.shared.hideWithMenuBar ? .on : .off
     }
 }

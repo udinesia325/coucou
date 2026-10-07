@@ -385,6 +385,11 @@ final class AppState: ObservableObject {
 
     /// The menu bar is hidden by a fullscreen app: the island slides away with it.
     @Published var fullscreenHidden = false
+    /// On (default): the island hides and shows with the macOS menu bar (fullscreen apps,
+    /// auto-hide). Off: always show, on every window and space.
+    @Published var hideWithMenuBar: Bool = UserDefaults.standard.object(forKey: "hideWithMenuBar") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(hideWithMenuBar, forKey: "hideWithMenuBar") }
+    }
 
     /// A Pomodoro focus or break is running (keeps the compact island up, shows the clock).
     @Published var focusRunning = false

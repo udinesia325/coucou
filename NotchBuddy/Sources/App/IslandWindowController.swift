@@ -360,6 +360,7 @@ final class IslandWindowController: NSWindowController {
     /// when a fullscreen app or auto-hide hides it. This works for every app — Chrome's
     /// fullscreen is several windows, none of them screen-sized, so window geometry can't tell.
     private func refreshFullscreenSpace() {
+        guard state.hideWithMenuBar else { fullscreenSpace = false; return }
         let known = (lastScreen ?? NSScreen.main)?.frame
         guard let screen = NSScreen.screens.first(where: { $0.frame == known }) ?? NSScreen.main else { return }
         let primaryH = NSScreen.screens.first?.frame.height ?? screen.frame.height
@@ -383,9 +384,12 @@ final class IslandWindowController: NSWindowController {
     /// Returns true while the island is hidden with the menu bar. Touching the top edge shows
     /// it right away (the menu bar follows a beat later); after that it tracks the menu bar.
     private func updateFullscreenVisibility(panel: IslandPanel, mouse: NSPoint) -> Bool {
+        // "Always show": no sampling at all, and an island hidden a moment ago slides back.
+        if !state.hideWithMenuBar { fullscreenSpace = false }
         // Sample the menu bar 6×/s while it is hidden (to catch it sliding back), 1×/s otherwise.
         fullscreenRecheckTick += 1
-        if fullscreenRecheckTick >= (fullscreenSpace || hiddenForFullscreen ? 10 : 60) {
+        if state.hideWithMenuBar,
+           fullscreenRecheckTick >= (fullscreenSpace || hiddenForFullscreen ? 10 : 60) {
             fullscreenRecheckTick = 0
             refreshFullscreenSpace()
         }

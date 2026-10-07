@@ -263,6 +263,12 @@ struct SettingsView: View {
                         .frame(width: 48)
                     Text("min without movement")
                 }
+                Toggle("Hide with the menu bar (fullscreen apps)", isOn: $state.hideWithMenuBar)
+                Text(state.hideWithMenuBar
+                     ? "The island slides away when the menu bar hides and comes back with it."
+                     : "Always show: the island stays on every window, fullscreen or not.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
             }
             .padding(6)
         }
