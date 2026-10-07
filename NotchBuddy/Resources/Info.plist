@@ -33,6 +33,10 @@
 	<string>Pour sauter au terminal, envoyer des mails et piloter Musique.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Pour afficher l'état du Bluetooth et les appareils connectés dans Stats.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Pour afficher votre prochaine réunion dans l'encoche.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Pour afficher votre prochaine réunion dans l'encoche.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSLocationUsageDescription</key>

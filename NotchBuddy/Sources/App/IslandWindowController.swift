@@ -177,7 +177,7 @@ final class IslandWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] newView in
                 guard let self else { return }
-                if newView == .prompt {
+                if newView == .prompt || newView == .notes {
                     self.islandPanel.makeKey()
                 }
             }
@@ -230,7 +230,7 @@ final class IslandWindowController: NSWindowController {
         }
 
         fsm.isHeldOpen = { AppState.shared.pendingApproval != nil }
-        fsm.keepsCompact = { AppState.shared.spotifyPlaying }
+        fsm.keepsCompact = { AppState.shared.spotifyPlaying || AppState.shared.focusRunning }
 
         // Spotify stopped: let the compact island time out again as usual.
         spotifySubscription = state.$spotifyPlaying

@@ -19,9 +19,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenuBarItem()
         setupIsland()
         _ = ClipboardHistory.shared   // starts recording only if the user turned it on
+        _ = ShelfStore.shared         // screenshot catcher
+        _ = MicCamMonitor.shared      // privacy dots, global mic mute
         #if !APPSTORE
         _ = SpotifyController.shared
         _ = DiscordController.shared   // connects only when the user set up a Discord app
+        _ = PowerStore.shared          // low-battery yawn
+        _ = CalendarStore.shared       // peeks out one minute before a meeting
         #endif
         #if PHONE_LINK
         CloudProbe.shared.startIfEnabled()

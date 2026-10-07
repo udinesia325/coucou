@@ -383,6 +383,9 @@ final class AppState: ObservableObject {
         DispatchQueue.global().asyncAfter(deadline: .now() + 3600, execute: work)
     }
 
+    /// A Pomodoro focus or break is running (keeps the compact island up, shows the clock).
+    @Published var focusRunning = false
+
     /// Last thing Mochi caught (clipboard item, shelf file): drives the catch animation.
     @Published var catchEvent: CatchEvent?
 

@@ -118,7 +118,18 @@ struct IslandContainer: View {
                         .position(x: islandWidth - 40, y: earH / 2)
                         .transition(.opacity)
                 }
+                if state.mode == .compact {
+                    PrivacyDots()
+                        .position(x: 14, y: (state.spotifyLyricRow && !compactLyricInline
+                                             ? islandHeight - compactLyricRowHeight : islandHeight) / 2)
+                }
                 #if !APPSTORE
+                // Focus countdown in the free middle of a notch-less bar (the lyric wins when both run).
+                if state.mode == .compact && state.focusRunning && !state.hasNotch && !state.spotifyLyricRow {
+                    CompactFocusClock()
+                        .position(x: islandWidth / 2, y: islandHeight / 2)
+                        .transition(.opacity)
+                }
                 if state.mode == .compact && state.spotifyLyricRow {
                     CompactSpotifyOverlay(islandW: islandWidth, islandH: islandHeight,
                                           inline: compactLyricInline)
@@ -456,7 +467,8 @@ struct IslandContentView: View {
                     // Views that fill available height instead of the fixed 98pt content frame:
                     // chat (prompt) is always flexible; mail is flexible only when active so
                     // it doesn't push the ZStack taller when inactive.
-                    let isTall = v == .prompt || ((v == .mail || v == .stats || v == .spotify) && active)
+                    let isTall = v == .prompt || ((v == .mail || v == .stats || v == .spotify
+                                                   || v == .markets || v == .today || v == .notes) && active)
                     let anim: Animation = active
                         ? .spring(response: 0.4, dampingFraction: 0.8).delay(0.16)
                         : .easeIn(duration: 0.16)
@@ -502,7 +514,10 @@ struct IslandHeader: View {
                 TabButton(icon: "doc.on.clipboard", view: .clipboard, state: state)
                 #if !APPSTORE
                 TabButton(icon: "music.note", view: .spotify, state: state)
+                TabButton(icon: "sun.max", view: .today, state: state)
                 #endif
+                TabButton(icon: "chart.line.uptrend.xyaxis", view: .markets, state: state)
+                TabButton(icon: "checklist", view: .notes, state: state)
             }
             .padding(.leading, 14)
 

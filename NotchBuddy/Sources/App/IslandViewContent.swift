@@ -29,10 +29,13 @@ struct IslandViewContent: View {
         case .stats:     StatsView(state: state)
         case .shelf:     ShelfView(state: state)
         case .clipboard: ClipboardView(state: state)
+        case .markets:   MarketsView(state: state)
+        case .notes:     NotesView(state: state)
         #if !APPSTORE
         case .spotify:   SpotifyView(state: state)
+        case .today:     TodayView(state: state)
         #else
-        case .spotify:   EmptyView()
+        case .spotify, .today: EmptyView()
         #endif
         }
     }

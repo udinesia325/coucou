@@ -48,6 +48,9 @@ jobs:
       - name: Lyrics (LRC) tests
         run: bash scripts/test-lrc.sh
 
+      - name: Stocks watchlist tests
+        run: bash scripts/test-stocks-watchlist.sh
+
       - name: Build
         run: |
           xcodebuild \

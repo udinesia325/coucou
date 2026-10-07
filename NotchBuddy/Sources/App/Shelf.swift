@@ -16,11 +16,49 @@ final class ShelfStore: ObservableObject {
         didSet { UserDefaults.standard.set(catchesDrops, forKey: "shelfCatchesDrops") }
     }
 
-    func add(_ urls: [URL]) {
+    /// New screenshots land on the shelf too (Spotlight live query, no polling).
+    @Published var catchScreenshots: Bool = UserDefaults.standard.object(forKey: "shelfCatchScreenshots") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(catchScreenshots, forKey: "shelfCatchScreenshots")
+            catchScreenshots ? startScreenshotWatch() : stopScreenshotWatch()
+        }
+    }
+    private var screenshotQuery: NSMetadataQuery?
+    private var screenshotObserver: Any?
+
+    private init() {
+        if catchScreenshots { startScreenshotWatch() }
+    }
+
+    private func startScreenshotWatch() {
+        guard screenshotQuery == nil else { return }
+        let query = NSMetadataQuery()
+        query.predicate = NSPredicate(format: "kMDItemIsScreenCapture == 1 AND kMDItemFSCreationDate >= %@", Date() as NSDate)
+        query.searchScopes = [NSMetadataQueryLocalComputerScope]
+        screenshotObserver = NotificationCenter.default.addObserver(forName: .NSMetadataQueryDidUpdate, object: query, queue: .main) { note in
+            let added = note.userInfo?[NSMetadataQueryUpdateAddedItemsKey] as? [NSMetadataItem] ?? []
+            let paths = added.compactMap { $0.value(forAttribute: NSMetadataItemPathKey) as? String }
+            guard !paths.isEmpty else { return }
+            Task { @MainActor in
+                ShelfStore.shared.add(paths.map { URL(fileURLWithPath: $0) }, icon: "camera.viewfinder")
+            }
+        }
+        query.start()
+        screenshotQuery = query
+    }
+
+    private func stopScreenshotWatch() {
+        screenshotQuery?.stop()
+        screenshotQuery = nil
+        if let screenshotObserver { NotificationCenter.default.removeObserver(screenshotObserver) }
+        screenshotObserver = nil
+    }
+
+    func add(_ urls: [URL], icon: String = "tray.and.arrow.down.fill") {
         let new = urls.filter { !items.contains($0) }
         guard !new.isEmpty else { return }
         items.append(contentsOf: new)
-        MochiCatch.fire(icon: "tray.and.arrow.down.fill", color: "#34D399")
+        MochiCatch.fire(icon: icon, color: "#34D399")
     }
 
     func remove(_ url: URL) { items.removeAll { $0 == url } }
@@ -67,6 +105,11 @@ struct ShelfView: View {
                             .foregroundColor(Color(hex: "#6B7079"))
                     }
                     Spacer()
+                    Toggle("Screenshots", isOn: $shelf.catchScreenshots)
+                        .toggleStyle(.checkbox)
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(hex: "#8E939C"))
+                        .help("New screenshots are added to the shelf")
                     Toggle("Catch all drops", isOn: $shelf.catchesDrops)
                         .toggleStyle(.checkbox)
                         .font(.system(size: 11))

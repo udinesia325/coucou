@@ -12,7 +12,7 @@ enum IslandView: String, CaseIterable {
     case overview, empty, approval, question, error, finished
     case confused, upload, uploading, choose, mail, prompt
     case searching, result, note, settings, greeting, wardrobe
-    case stats, shelf, clipboard, spotify
+    case stats, shelf, clipboard, spotify, markets, today, notes
 }
 
 // MARK: - Bot State
@@ -202,6 +202,9 @@ enum IslandConst {
         .shelf:     ViewLayout(height: 160, botX: 54,  botY: nil, botDiameter: 46, agentMode: .none),
         .clipboard: ViewLayout(height: 160, botX: 54,  botY: nil, botDiameter: 46, agentMode: .none),
         .spotify:   ViewLayout(height: 200, botX: 54,  botY: nil, botDiameter: 46, agentMode: .none),
+        .markets:   ViewLayout(height: 200, botX: 54,  botY: nil, botDiameter: 46, agentMode: .none),
+        .today:     ViewLayout(height: 200, botX: 54,  botY: nil, botDiameter: 46, agentMode: .none),
+        .notes:     ViewLayout(height: 200, botX: 54,  botY: nil, botDiameter: 46, agentMode: .none),
     ]
 
     // Project colors — keyed by lowercase display name or slug
