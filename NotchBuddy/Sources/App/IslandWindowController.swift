@@ -332,24 +332,35 @@ final class IslandWindowController: NSWindowController {
 
     private func startFullscreenWatch() {
         let center = NSWorkspace.shared.notificationCenter
-        for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
-            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    // Re-check while the fullscreen animation settles.
-                    for delay: UInt64 in [0, 400_000_000, 800_000_000] {
-                        try? await Task.sleep(nanoseconds: delay)
-                        self?.refreshFullscreenSpace()
-                    }
+        let recheck: @Sendable (Notification) -> Void = { [weak self] _ in
+            Task { @MainActor [weak self] in
+                // Re-check while the fullscreen animation settles (Chrome's takes over a second).
+                for delay: UInt64 in [0, 400_000_000, 600_000_000, 1_000_000_000] {
+                    try? await Task.sleep(nanoseconds: delay)
+                    self?.refreshFullscreenSpace()
                 }
             }
         }
+        for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main, using: recheck)
+        }
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
+                                               object: nil, queue: .main, using: recheck)
         refreshFullscreenSpace()
     }
 
-    /// A window of another app covering the whole screen, menu bar area included, means the
-    /// space is fullscreen (or the menu bar is auto-hidden over a full-height window).
+    /// The menu bar is hidden in this space when macOS gives the whole screen to apps
+    /// (visibleFrame reaches the top: fullscreen space, or menu bar auto-hide), or when another
+    /// app's window covers the whole screen. Chrome's fullscreen window isn't exactly the
+    /// screen size, so the window test checks coverage rather than equality.
     private func refreshFullscreenSpace() {
-        guard let screen = lastScreen ?? NSScreen.main else { return }
+        // Fresh NSScreen (cached instances can keep an old visibleFrame).
+        let known = (lastScreen ?? NSScreen.main)?.frame
+        guard let screen = NSScreen.screens.first(where: { $0.frame == known }) ?? NSScreen.main else { return }
+        if screen.visibleFrame.maxY >= screen.frame.maxY - 1 {
+            fullscreenSpace = true
+            return
+        }
         let primaryH = NSScreen.screens.first?.frame.height ?? screen.frame.height
         let f = screen.frame
         let target = CGRect(x: f.minX, y: primaryH - f.maxY, width: f.width, height: f.height)  // CG coords
@@ -361,8 +372,8 @@ final class IslandWindowController: NSWindowController {
                   (w[kCGWindowOwnerPID as String] as? Int).map(pid_t.init) != me,
                   let bounds = w[kCGWindowBounds as String] as? NSDictionary,
                   let rect = CGRect(dictionaryRepresentation: bounds) else { return false }
-            return abs(rect.minX - target.minX) < 2 && abs(rect.minY - target.minY) < 2
-                && abs(rect.width - target.width) < 2 && abs(rect.height - target.height) < 2
+            return rect.minX <= target.minX + 2 && rect.minY <= target.minY + 2
+                && rect.maxX >= target.maxX - 2 && rect.maxY >= target.maxY - 2
         }
     }
 
