@@ -95,6 +95,9 @@ final class IslandWindowController: NSWindowController {
         panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 3)
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
         panel.ignoresMouseEvents = true
+        // NSPanel hides itself whenever Coucou stops being the active app (after Settings,
+        // the chat, a permission prompt…), which made the island vanish on other windows.
+        panel.hidesOnDeactivate = false
 
         // Propagate real notch dimensions to AppState
         AppState.shared.notchWidth  = notchW
@@ -419,6 +422,12 @@ final class IslandWindowController: NSWindowController {
                     self?.state.fullscreenHidden = false
                 }
             }
+        }
+        // Self-heal: the island should be up but its window isn't on screen (hidden by AppKit
+        // or anything else) — bring it back.
+        if !hiddenForFullscreen && !panel.isVisible {
+            panel.orderFrontRegardless()
+            state.fullscreenHidden = false
         }
         if !hide, let screen = panel.screen { lastScreen = screen }
         return hide
