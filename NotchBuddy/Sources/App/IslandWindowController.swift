@@ -1309,6 +1309,20 @@ let compactLyricWidth: CGFloat = 230
 @MainActor
 var compactLyricInline: Bool { AppState.shared.spotifyLyricRow && !AppState.shared.hasNotch }
 
+/// Without a notch and with nothing else in the middle (lyric, focus clock), the compact
+/// island widens for a stats strip: [Mochi][CPU RAM temp fan ↓↑][mini grid].
+let compactStatsWidth: CGFloat = 210
+
+@MainActor
+var compactStatsInline: Bool {
+    #if APPSTORE
+    return false
+    #else
+    let s = AppState.shared
+    return !s.hasNotch && !s.spotifyLyricRow && !s.focusRunning
+    #endif
+}
+
 @MainActor
 func islandSize(mode: IslandMode, view: IslandView,
                 progress: Double = 0,
@@ -1317,6 +1331,7 @@ func islandSize(mode: IslandMode, view: IslandView,
     switch mode {
     case .hidden:   return (nw, nh)
     case .compact:
+        if compactStatsInline { return (nw + 160 + compactStatsWidth, nh) }
         guard AppState.shared.spotifyLyricRow else { return (nw + 160, nh) }
         return compactLyricInline ? (nw + 160 + compactLyricWidth, nh) : (nw + 160, nh + compactLyricRowHeight)
     case .expanded:

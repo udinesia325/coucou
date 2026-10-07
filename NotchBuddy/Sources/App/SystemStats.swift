@@ -57,19 +57,20 @@ final class SystemStats: ObservableObject {
     private lazy var smc = SMC()
 
     /// Samples every 1.5 s until the calling task is cancelled.
-    func run() async {
+    /// `light` (compact strip) skips disk and Wi-Fi/Bluetooth, which it doesn't show.
+    func run(light: Bool = false) async {
         while !Task.isCancelled {
-            sample()
+            sample(light: light)
             try? await Task.sleep(nanoseconds: 1_500_000_000)
         }
     }
 
-    private func sample() {
+    private func sample(light: Bool) {
         sampleCPU()
         sampleMemory()
-        sampleDisk()
+        if !light { sampleDisk() }
         sampleNetwork()
-        sampleRadios()
+        if !light { sampleRadios() }
         temperature = smc?.temperature()
         fanRPM = smc?.fanRPM()
     }
@@ -544,5 +545,49 @@ private struct CPUSparkline: View {
             ctx.fill(area { $0.user + $0.system }, with: .color(StatsView.systemColor.opacity(0.85)))
             ctx.fill(area { $0.user }, with: .color(StatsView.userColor.opacity(0.9)))
         }
+    }
+}
+
+// MARK: - Compact island without a notch: one line of stats between Mochi and the mini grid
+
+struct CompactStatsStrip: View {
+    @ObservedObject var stats = SystemStats.shared
+    /// false while the island is slid away with the menu bar: no sampling then.
+    let active: Bool
+
+    var body: some View {
+        let cpu = stats.cpu.last
+        HStack(spacing: 8) {
+            item("cpu") {
+                Text(StatsView.pct(cpu?.user)).foregroundColor(StatsView.userColor)
+                Text(StatsView.pct(cpu?.system)).foregroundColor(StatsView.systemColor)
+            }
+            item("memorychip") { Text(StatsView.pct(Double(stats.memUsed) / Double(max(1, stats.memTotal)))) }
+            if let t = stats.temperature { item("thermometer") { Text(String(format: "%.0f°", t)) } }
+            if let rpm = stats.fanRPM { item("fanblades") { Text("\(Int(rpm))") } }
+            item("arrow.down") { Text(Self.rate(stats.netIn)) }
+            item("arrow.up") { Text(Self.rate(stats.netOut)) }
+        }
+        .font(.system(size: 10, weight: .semibold).monospacedDigit())
+        .foregroundColor(.white.opacity(0.88))
+        .lineLimit(1)
+        .allowsHitTesting(false)
+        .task(id: active) {
+            if active { await stats.run(light: true) }
+        }
+    }
+
+    private func item<C: View>(_ icon: String, @ViewBuilder _ value: () -> C) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: icon).font(.system(size: 8.5)).foregroundColor(StatsView.dim)
+            value()
+        }
+        .fixedSize()
+    }
+
+    /// 1.2M / 340K — short enough for the strip.
+    static func rate(_ bytesPerSecond: Double) -> String {
+        bytesPerSecond >= 1_000_000 ? String(format: "%.1fM", bytesPerSecond / 1_000_000)
+            : "\(Int(bytesPerSecond / 1000))K"
     }
 }

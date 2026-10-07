@@ -130,6 +130,12 @@ struct IslandContainer: View {
                         .position(x: islandWidth / 2, y: islandHeight / 2)
                         .transition(.opacity)
                 }
+                if state.mode == .compact && compactStatsInline {
+                    CompactStatsStrip(active: !state.fullscreenHidden)
+                        .frame(width: islandWidth - 128, height: islandHeight)
+                        .position(x: islandWidth / 2, y: islandHeight / 2)
+                        .transition(.opacity)
+                }
                 if state.mode == .compact && state.spotifyLyricRow {
                     CompactSpotifyOverlay(islandW: islandWidth, islandH: islandHeight,
                                           inline: compactLyricInline)
@@ -180,12 +186,9 @@ struct IslandContainer: View {
                 islandHeight = newView == .prompt ? chatPromptHeight : h
             }
         }
-        .onChangeCompat(of: state.spotifyLyricRow) { _, _ in
-            guard state.mode == .compact else { return }
-            let (w, h) = islandSize(mode: .compact, view: state.view,
-                                    nw: state.notchWidth, nh: state.notchHeight)
-            withAnimation(openSpring) { islandWidth = w; islandHeight = h }
-        }
+        .onChangeCompat(of: state.spotifyLyricRow) { _, _ in resizeCompact() }
+        // The focus clock takes the stats strip's place on a notch-less bar.
+        .onChangeCompat(of: state.focusRunning) { _, _ in resizeCompact() }
         .onChangeCompat(of: state.chatHistory.count) { _, _ in
             guard state.mode == .expanded, state.view == .prompt else { return }
             withAnimation(openSpring) { islandHeight = chatPromptHeight }
@@ -202,6 +205,13 @@ struct IslandContainer: View {
         .onReceive(NotificationCenter.default.publisher(for: .botGreet)) { _ in
             greetNotif.toggle()
         }
+    }
+
+    private func resizeCompact() {
+        guard state.mode == .compact else { return }
+        let (w, h) = islandSize(mode: .compact, view: state.view,
+                                nw: state.notchWidth, nh: state.notchHeight)
+        withAnimation(openSpring) { islandWidth = w; islandHeight = h }
     }
 
     private func modeOrder(_ m: IslandMode) -> Int {
