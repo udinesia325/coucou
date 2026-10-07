@@ -248,12 +248,13 @@ final class IslandWindowController: NSWindowController {
             }
     }
 
-    // MARK: - 60 Hz polling loop
+    // MARK: - 30 Hz polling loop (hover needs no more; 60 Hz cost old Macs a steady few % CPU)
 
     private func startPolling() {
-        frameTimer = Timer.scheduledTimer(withTimeInterval: 1.0/60.0, repeats: true) { [weak self] _ in
+        frameTimer = Timer.scheduledTimer(withTimeInterval: 1.0/30.0, repeats: true) { [weak self] _ in
+            // The timer fires on the main run loop: no Task to allocate every tick.
             guard let self else { return }
-            Task { @MainActor in self.pollFrame() }
+            MainActor.assumeIsolated { self.pollFrame() }
         }
         RunLoop.main.add(frameTimer!, forMode: .common)
     }
@@ -389,7 +390,7 @@ final class IslandWindowController: NSWindowController {
         // Sample the menu bar 6×/s while it is hidden (to catch it sliding back), 1×/s otherwise.
         fullscreenRecheckTick += 1
         if state.hideWithMenuBar,
-           fullscreenRecheckTick >= (fullscreenSpace || hiddenForFullscreen ? 10 : 60) {
+           fullscreenRecheckTick >= (fullscreenSpace || hiddenForFullscreen ? 5 : 30) {
             fullscreenRecheckTick = 0
             refreshFullscreenSpace()
         }

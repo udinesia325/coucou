@@ -488,6 +488,7 @@ struct IslandContentView: View {
                         .opacity(active ? 1 : 0)
                         .scaleEffect(active ? 1 : 0.97)
                         .allowsHitTesting(active)
+                        .environment(\.islandViewActive, active)
                         .animation(anim, value: state.view)
                 }
             }
@@ -676,5 +677,17 @@ struct CompactMiniGrid: View {
             }
         }
         .frame(width: 28, height: 28)
+    }
+}
+
+/// false inside the island views kept alive at opacity 0, so their animations stop ticking.
+private struct IslandViewActiveKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    var islandViewActive: Bool {
+        get { self[IslandViewActiveKey.self] }
+        set { self[IslandViewActiveKey.self] = newValue }
     }
 }

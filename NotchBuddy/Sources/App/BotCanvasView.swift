@@ -13,7 +13,8 @@ struct BotCanvasView: View {
     @StateObject private var engine = BotEngine()
 
     var body: some View {
-        TimelineView(.animation(paused: state.mode == .hidden)) { timeline in
+        // 30 fps: half the redraws of display rate, same look (old Intel Macs lag at 60).
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: state.mode == .hidden)) { timeline in
             Canvas { context, size in
                 let now = timeline.date.timeIntervalSinceReferenceDate
                 let dtRaw = min(0.05, now - engine.lastTime)
@@ -194,6 +195,7 @@ struct MiniBotCanvasView: View {
     let task: AgentTask
     var isDancing: Bool = false
     @StateObject private var engine: BotEngine
+    @Environment(\.islandViewActive) private var viewActive
 
     init(task: AgentTask, isDancing: Bool = false) {
         self.task = task
@@ -207,7 +209,7 @@ struct MiniBotCanvasView: View {
     }
 
     var body: some View {
-        TimelineView(.animation) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !viewActive)) { timeline in
             Canvas { context, size in
                 let now = timeline.date.timeIntervalSinceReferenceDate
                 let dt = min(0.05, now - engine.lastTime)

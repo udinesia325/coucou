@@ -3732,9 +3732,10 @@ struct TickerRowView: View {
 
 struct TickerShimmerText: View {
     let text: String
+    @Environment(\.islandViewActive) private var viewActive
 
     var body: some View {
-        TimelineView(.animation) { tl in
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !viewActive)) { tl in
             let t = tl.date.timeIntervalSinceReferenceDate
             let p = CGFloat(t.truncatingRemainder(dividingBy: 2.2) / 2.2)
             // phase sweeps -0.1 → 1.1 so white peak enters from left and exits right
