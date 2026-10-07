@@ -20,10 +20,11 @@ final class IslandWindowController: NSWindowController {
     private var dragToShelf = false
     // Fullscreen apps: the island hides with the menu bar and comes back with it.
     private var fullscreenSpace = false
-    private var fullscreenRevealed = false
     private var hiddenForFullscreen = false
     private var fullscreenOrderTask: Task<Void, Never>?
     private var fullscreenRecheckTick = 0
+    private var menuBarDetectionWorks = false
+    private var topEdgeTouched = Date.distantPast
     private var lastScreen: NSScreen?
 
     // Confused recovery timer (set by handleDizzy)
@@ -351,50 +352,48 @@ final class IslandWindowController: NSWindowController {
         refreshFullscreenSpace()
     }
 
-    /// The menu bar is hidden in this space when macOS gives the whole screen to apps
-    /// (visibleFrame reaches the top: fullscreen space, or menu bar auto-hide), or when another
-    /// app's window covers the whole screen. Chrome's fullscreen window isn't exactly the
-    /// screen size, so the window test checks coverage rather than equality.
+    /// Follows the real menu bar: the "Window Server" menu bar window (main-menu level) sits at
+    /// the top of the screen while the menu bar shows, and slides above it (or goes offscreen)
+    /// when a fullscreen app or auto-hide hides it. This works for every app — Chrome's
+    /// fullscreen is several windows, none of them screen-sized, so window geometry can't tell.
     private func refreshFullscreenSpace() {
-        // Fresh NSScreen (cached instances can keep an old visibleFrame).
         let known = (lastScreen ?? NSScreen.main)?.frame
         guard let screen = NSScreen.screens.first(where: { $0.frame == known }) ?? NSScreen.main else { return }
-        if screen.visibleFrame.maxY >= screen.frame.maxY - 1 {
-            fullscreenSpace = true
-            return
-        }
         let primaryH = NSScreen.screens.first?.frame.height ?? screen.frame.height
         let f = screen.frame
-        let target = CGRect(x: f.minX, y: primaryH - f.maxY, width: f.width, height: f.height)  // CG coords
-        // Only the active app's windows count: a big window of a background app isn't fullscreen.
-        guard let front = NSWorkspace.shared.frontmostApplication?.processIdentifier,
-              front != ProcessInfo.processInfo.processIdentifier else { fullscreenSpace = false; return }
-        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
-            as? [[String: Any]] ?? []
-        fullscreenSpace = windows.contains { w in
-            guard (w[kCGWindowLayer as String] as? Int) == 0,
-                  (w[kCGWindowOwnerPID as String] as? Int).map(pid_t.init) == front,
+        let top = primaryH - f.maxY                      // screen top in CG coordinates
+        let level = Int(CGWindowLevelForKey(.mainMenuWindow))
+        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        let shown = windows.contains { w in
+            guard (w[kCGWindowLayer as String] as? Int) == level,
+                  (w[kCGWindowOwnerName as String] as? String)?.replacingOccurrences(of: " ", with: "") == "WindowServer",
                   let bounds = w[kCGWindowBounds as String] as? NSDictionary,
-                  let rect = CGRect(dictionaryRepresentation: bounds) else { return false }
-            return rect.minX <= target.minX + 2 && rect.minY <= target.minY + 2
-                && rect.maxX >= target.maxX - 2 && rect.maxY >= target.maxY - 2
+                  let r = CGRect(dictionaryRepresentation: bounds),
+                  abs(r.minX - f.minX) < 2, r.width >= f.width - 2 else { return false }
+            return r.minY >= top - 1
         }
+        if shown { menuBarDetectionWorks = true }
+        // Fail open: if this Mac never showed us a menu bar window, never hide the island.
+        fullscreenSpace = menuBarDetectionWorks && !shown
     }
 
-    /// Returns true while the island is hidden for a fullscreen app. Touching the top edge
-    /// (which also slides the menu bar down) shows it until the cursor moves away again.
+    /// Returns true while the island is hidden with the menu bar. Touching the top edge shows
+    /// it right away (the menu bar follows a beat later); after that it tracks the menu bar.
     private func updateFullscreenVisibility(panel: IslandPanel, mouse: NSPoint) -> Bool {
+        // Sample the menu bar 6×/s while it is hidden (to catch it sliding back), 1×/s otherwise.
+        fullscreenRecheckTick += 1
+        if fullscreenRecheckTick >= (fullscreenSpace || hiddenForFullscreen ? 10 : 60) {
+            fullscreenRecheckTick = 0
+            refreshFullscreenSpace()
+        }
         var hide = false
         if fullscreenSpace, state.pendingApproval == nil, !state.fileDragOver, !inAttachDrag, attachDragStart == nil,
            let frame = (lastScreen ?? panel.screen ?? NSScreen.main)?.frame {
             let onScreen = mouse.x >= frame.minX && mouse.x <= frame.maxX && mouse.y >= frame.minY
-            let islandH = panel.currentIslandFrame(nw: notchW, nh: notchH).height
-            if onScreen && mouse.y >= frame.maxY - 1 {
-                fullscreenRevealed = true
-            } else if !onScreen || mouse.y < frame.maxY - (NSStatusBar.system.thickness + islandH + 12) {
-                fullscreenRevealed = false
-            }
-            hide = !fullscreenRevealed
+            if onScreen && mouse.y >= frame.maxY - 1 { topEdgeTouched = Date() }
+            let justTouched = Date().timeIntervalSince(topEdgeTouched) < 0.8
+            let interacting = state.mode == .expanded && wasInIsland
+            hide = !justTouched && !interacting
         }
         if hide != hiddenForFullscreen {
             hiddenForFullscreen = hide
@@ -419,14 +418,6 @@ final class IslandWindowController: NSWindowController {
                     guard !Task.isCancelled, self?.hiddenForFullscreen == false else { return }
                     self?.state.fullscreenHidden = false
                 }
-            }
-        }
-        // Never stay hidden on a stale answer: re-check the space every second while it matters.
-        if fullscreenSpace || hiddenForFullscreen {
-            fullscreenRecheckTick += 1
-            if fullscreenRecheckTick >= 60 {
-                fullscreenRecheckTick = 0
-                refreshFullscreenSpace()
             }
         }
         if !hide, let screen = panel.screen { lastScreen = screen }
