@@ -245,6 +245,14 @@ struct OverviewView: View {
             switchChatProvider(.ollama)
         case "ai_lmstudio":
             switchChatProvider(.lmstudio)
+        case "ai_claudecode":
+            switchChatProvider(.claudeCode)
+        case "integration_spotify":
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { AppState.shared.view = .spotify }
+        case "integration_discord":
+            #if !APPSTORE
+            DiscordController.shared.openDiscord()
+            #endif
         case "integration_music":
             #if !APPSTORE
             MusicController.shared.openMusic()
@@ -1311,6 +1319,9 @@ struct ModelPickerView: View {
             let visibleProviders = ChatProvider.allCases.filter { p in
                 if p == .ollama   { return !AppState.shared.ollamaServerURL.isEmpty   || state.chatProvider == .ollama }
                 if p == .lmstudio { return !AppState.shared.lmstudioServerURL.isEmpty || state.chatProvider == .lmstudio }
+                #if APPSTORE
+                if p == .claudeCode { return false }   // the sandbox can't run the claude CLI
+                #endif
                 return true
             }
             ChipFlow(spacing: 6) {
@@ -1373,6 +1384,19 @@ struct ModelPickerView: View {
 
     @ViewBuilder
     private var modelListView: some View {
+        #if !APPSTORE
+        if state.chatProvider == .claudeCode {
+            ClaudeCodeSessionsView(state: state, isPresented: $isPresented)
+        } else {
+            providerModelList
+        }
+        #else
+        providerModelList
+        #endif
+    }
+
+    @ViewBuilder
+    private var providerModelList: some View {
         if state.loadingProviderModels.contains(state.chatProvider) {
             HStack(spacing: 8) {
                 ProgressView().scaleEffect(0.7)
@@ -1398,6 +1422,7 @@ struct ModelPickerView: View {
                             case .openai:    state.openAIChatModel = model.id
                             case .ollama:    state.ollamaChatModel = model.id
                             case .lmstudio:  state.lmstudioChatModel = model.id
+                            case .claudeCode: state.claudeCodeModel = model.id
                             }
                             isPresented = false
                             SoundEngine.shared.play("blip")
@@ -1586,6 +1611,10 @@ struct IntegrationCardView: View {
     var onDiffTap: ((Int) -> Void)? = nil
     @ObservedObject private var appState = AppState.shared
     @State private var githubDetailSection: GitHubDetailSection = .myPRs
+    #if !APPSTORE
+    @ObservedObject private var spotify = SpotifyController.shared
+    @ObservedObject private var discord = DiscordController.shared
+    #endif
 
     private var isConfigured: Bool {
         switch task.id {
@@ -1624,6 +1653,15 @@ struct IntegrationCardView: View {
             #else
             return false
             #endif
+        case "integration_spotify", "ai_claudecode":
+            #if !APPSTORE
+            return true  // nothing to configure: AppleScript / the local claude CLI
+            #else
+            return false
+            #endif
+        case "integration_discord":
+            return KeychainStore.shared.get("discord-client-id") != nil
+                && KeychainStore.shared.get("discord-client-secret") != nil
         case "ai_anthropic":  return KeychainStore.shared.get("anthropic-api-key") != nil
         case "ai_google":     return KeychainStore.shared.get("google-api-key")    != nil
         case "ai_openai":     return KeychainStore.shared.get("openai-api-key")    != nil
@@ -1717,6 +1755,18 @@ struct IntegrationCardView: View {
 
     private var statusDot: Color {
         #if !APPSTORE
+        if task.id == "integration_spotify" {
+            if spotify.automationDenied { return Color(hex: "#F4505E") }
+            return spotify.isPlaying ? Color(hex: "#1DB954") : Color(hex: "#6B7079")
+        }
+        if task.id == "integration_discord" {
+            switch discord.status {
+            case .connected:     return discord.channel == nil ? Color(hex: "#6B7079")
+                                     : discord.muted || discord.deafened ? Color(hex: "#F4505E") : Color(hex: "#22C55E")
+            case .notConfigured, .failed: return Color(hex: "#F4505E")
+            default:             return Color(hex: "#6B7079")
+            }
+        }
         if task.id == "integration_music" {
             if appState.musicAutomationDenied { return Color(hex: "#F4505E") }
             return appState.musicPlaying ? Color(hex: "#FA2D48") : Color(hex: "#22C55E")
@@ -1732,6 +1782,13 @@ struct IntegrationCardView: View {
 
     private var statusLabel: String {
         #if !APPSTORE
+        if task.id == "integration_spotify" {
+            if spotify.automationDenied { return "Automation not allowed" }
+            if let title = spotify.title { return (spotify.isPlaying ? "Playing · " : "Paused · ") + title }
+            return spotify.isRunning ? "Not playing" : "Spotify isn't running"
+        }
+        if task.id == "integration_discord" { return discord.statusLabel }
+        if task.id == "ai_claudecode" { return "Your Claude login · \(appState.claudeCodeModel)" }
         if task.id == "integration_music" {
             if appState.musicAutomationDenied { return "Automation not allowed" }
             if appState.musicPlaying { return "Playing · \(MusicController.shared.trackTitle ?? "Unknown")" }
@@ -1947,6 +2004,51 @@ struct IntegrationCardView: View {
                                 .font(.system(size: 11))
                                 .foregroundColor(Color(hex: "#8E939C"))
                                 .buttonStyle(.plain)
+                        }
+                        #endif
+                    } else if task.id == "integration_spotify" {
+                        #if !APPSTORE
+                        if spotify.hasTrack {
+                            PillIconButton(icon: "backward.fill") { spotify.previous() }
+                            PillIconButton(icon: spotify.isPlaying ? "pause.fill" : "play.fill") { spotify.playPause() }
+                            PillIconButton(icon: "forward.fill") { spotify.next() }
+                            Button("Lyrics & player") {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { appState.view = .spotify }
+                            }
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Color(hex: task.color).opacity(0.85))
+                            .buttonStyle(.plain)
+                        } else if spotify.automationDenied {
+                            Button("Open Settings…") { spotify.openAutomationSettings() }
+                                .font(.system(size: 11)).foregroundColor(Color(hex: "#8E939C")).buttonStyle(.plain)
+                        } else {
+                            Button("Open Spotify") { spotify.openSpotify() }
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(Color(hex: task.color).opacity(0.85))
+                                .buttonStyle(.plain)
+                        }
+                        #endif
+                    } else if task.id == "integration_discord" {
+                        #if !APPSTORE
+                        if discord.status == .connected && discord.channel != nil {
+                            PillToggleButton(on: discord.muted, icon: discord.muted ? "mic.slash.fill" : "mic.fill",
+                                             label: discord.muted ? "Unmute" : "Mute") { discord.toggleMute() }
+                            PillToggleButton(on: discord.deafened, icon: discord.deafened ? "speaker.slash.fill" : "headphones",
+                                             label: discord.deafened ? "Undeafen" : "Deafen") { discord.toggleDeafen() }
+                        } else if isConfigured {
+                            if discord.isRunning {
+                                if case .failed = discord.status {
+                                    Button("Retry") { discord.reconnect(resetTokens: false) }
+                                        .font(.system(size: 11, weight: .medium))
+                                        .foregroundColor(Color(hex: task.color).opacity(0.9))
+                                        .buttonStyle(.plain)
+                                }
+                            } else {
+                                Button("Open Discord") { discord.openDiscord() }
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(Color(hex: task.color).opacity(0.9))
+                                    .buttonStyle(.plain)
+                            }
                         }
                         #endif
                     } else if n8nHasActivity {

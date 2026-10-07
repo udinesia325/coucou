@@ -48,7 +48,8 @@ struct BotCanvasView: View {
                 // Spotify playing: Mochi turns Spotify green and dances (compact notch, Spotify tab).
                 let spotifyMochi = state.spotifyPlaying
                     && [BotState.idle, .working, .thinking, .searching, .finished].contains(state.effectiveState)
-                    && (state.mode == .compact || (state.mode == .expanded && state.view == .spotify))
+                    && (state.mode == .compact || (state.mode == .expanded
+                        && (state.view == .spotify || (state.view == .overview && state.focusId == "integration_spotify"))))
                 if spotifyMochi { engine.bodyColor = cgColorFromHex("#1DB954") }
 
                 // Compute shouldDance per-frame (no observer lag)

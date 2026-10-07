@@ -104,12 +104,15 @@ struct IslandContainer: View {
                 .opacity(uploadActive || greetingActive ? 0 : 1)
                 .animation(.easeInOut(duration: 0.25), value: uploadActive || greetingActive)
 
+            CatchBurst(state: state, islandW: islandWidth, islandH: islandHeight)
+                .opacity(uploadActive || greetingActive ? 0 : 1)
+
             CountdownBar(state: state, islandW: islandWidth)
 
             Group {
                 if state.mode == .compact {
                     // With the lyric row, the grid stays in the ear next to the notch.
-                    let earH = state.spotifyLyricRow ? islandHeight - compactLyricRowHeight : islandHeight
+                    let earH = state.spotifyLyricRow && !compactLyricInline ? islandHeight - compactLyricRowHeight : islandHeight
                     CompactMiniGrid(state: state)
                         .scaleEffect(IslandRestingLayout(width: islandWidth, height: earH).miniGridScale)
                         .position(x: islandWidth - 40, y: earH / 2)
@@ -118,7 +121,7 @@ struct IslandContainer: View {
                 #if !APPSTORE
                 if state.mode == .compact && state.spotifyLyricRow {
                     CompactSpotifyOverlay(islandW: islandWidth, islandH: islandHeight,
-                                          notchH: islandHeight - compactLyricRowHeight)
+                                          inline: compactLyricInline)
                         .transition(.opacity)
                 }
                 #endif
@@ -159,9 +162,9 @@ struct IslandContainer: View {
         }
         .onChangeCompat(of: state.spotifyLyricRow) { _, _ in
             guard state.mode == .compact else { return }
-            let (_, h) = islandSize(mode: .compact, view: state.view,
+            let (w, h) = islandSize(mode: .compact, view: state.view,
                                     nw: state.notchWidth, nh: state.notchHeight)
-            withAnimation(openSpring) { islandHeight = h }
+            withAnimation(openSpring) { islandWidth = w; islandHeight = h }
         }
         .onChangeCompat(of: state.chatHistory.count) { _, _ in
             guard state.mode == .expanded, state.view == .prompt else { return }

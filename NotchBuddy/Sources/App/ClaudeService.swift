@@ -188,6 +188,9 @@ final class ClaudeService {
 
     func clearConversation() {
         conversationMessages = []
+        #if !APPSTORE
+        ClaudeCodeChat.shared.newSession()
+        #endif
     }
 
     /// Resolved once: NSFullUserName() is a system call, and the name cannot change under us
@@ -217,6 +220,12 @@ final class ClaudeService {
     // MARK: - Chat (multi-turn, natural text + web search)
 
     func chat(query: String, context: PromptContext?, state: AppState) async {
+        #if !APPSTORE
+        if state.chatProvider == .claudeCode {
+            await ClaudeCodeChat.shared.send(query: query, context: context, state: state)
+            return
+        }
+        #endif
         guard state.chatProvider == .anthropic else {
             await chatOpenAICompatible(query: query, context: context, state: state)
             return
@@ -279,7 +288,7 @@ final class ClaudeService {
             switch provider {
             case .google:  baseURL = "https://generativelanguage.googleapis.com/v1beta/openai"
             case .openai:  baseURL = "https://api.openai.com/v1"
-            case .anthropic, .ollama, .lmstudio: baseURL = ""
+            case .anthropic, .ollama, .lmstudio, .claudeCode: baseURL = ""
             }
         }
 

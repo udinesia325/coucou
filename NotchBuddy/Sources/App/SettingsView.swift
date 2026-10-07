@@ -75,6 +75,8 @@ struct SettingsView: View {
     @State private var stripeKey: String    = KeychainStore.shared.get("stripe-api-key")  ?? ""
     @State private var calcomKey: String    = KeychainStore.shared.get("calcom-api-key")  ?? ""
     @State private var notionKey: String    = KeychainStore.shared.get("notion-api-key")  ?? ""
+    @State private var discordClientId: String     = KeychainStore.shared.get("discord-client-id")     ?? ""
+    @State private var discordClientSecret: String = KeychainStore.shared.get("discord-client-secret") ?? ""
 
     // Hotkey
     @State private var hotkeyFlags: UInt    = AppState.shared.hotkeyFlags
@@ -851,6 +853,24 @@ struct SettingsView: View {
                         .textFieldStyle(.roundedBorder)
                 }
 
+                #if !APPSTORE
+                // Discord (voice mute / deafen through local RPC)
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Circle().fill(Color(hex: "#5865F2")).frame(width: 8, height: 8)
+                        Text("Discord").font(.system(size: 12, weight: .semibold))
+                    }
+                    TextField("Client ID", text: $discordClientId)
+                        .textFieldStyle(.roundedBorder)
+                    SecureField("Client Secret", text: $discordClientSecret)
+                        .textFieldStyle(.roundedBorder)
+                    Text("Create an application at discord.com/developers/applications, open OAuth2, add the redirect http://localhost, then copy the Client ID and Client Secret here. Discord asks you to authorize Coucou once.")
+                        .font(.system(size: 10))
+                        .foregroundColor(Color(hex: "#8E939C"))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                #endif
+
                 Button("Save integrations") { saveIntegrations() }
                     .buttonStyle(.borderedProminent)
             }
@@ -1145,6 +1165,13 @@ struct SettingsView: View {
         saveKey("stripe-api-key",  value: stripeKey)
         saveKey("calcom-api-key",  value: calcomKey)
         saveKey("notion-api-key",  value: notionKey)
+        #if !APPSTORE
+        let discordChanged = KeychainStore.shared.get("discord-client-id") != (discordClientId.isEmpty ? nil : discordClientId)
+            || KeychainStore.shared.get("discord-client-secret") != (discordClientSecret.isEmpty ? nil : discordClientSecret)
+        saveKey("discord-client-id",     value: discordClientId.trimmingCharacters(in: .whitespaces))
+        saveKey("discord-client-secret", value: discordClientSecret.trimmingCharacters(in: .whitespaces))
+        if discordChanged { DiscordController.shared.reconnect(resetTokens: true) }
+        #endif
         statusMessage = "✓ Integration keys saved."
     }
 

@@ -559,7 +559,8 @@ struct CompactSpotifyOverlay: View {
     @ObservedObject var spotify = SpotifyController.shared
     let islandW: CGFloat
     let islandH: CGFloat
-    let notchH: CGFloat
+    /// true: [Mochi][lyric][mini grid] on one line; false: lyric row under the notch.
+    let inline: Bool
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !spotify.isPlaying)) { ctx in
@@ -577,8 +578,9 @@ struct CompactSpotifyOverlay: View {
                         .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
                                                 removal: .opacity))
                 }
-                .frame(width: islandW - 84, height: compactLyricRowHeight, alignment: .center)
-                .offset(x: 64, y: notchH)
+                .frame(width: inline ? islandW - 128 : islandW - 84,
+                       height: inline ? islandH : compactLyricRowHeight, alignment: .center)
+                .offset(x: 64, y: inline ? 0 : islandH - compactLyricRowHeight)
                 .animation(.easeOut(duration: 0.3), value: spotify.compactLine(at: ctx.date))
             }
             .frame(width: islandW, height: islandH, alignment: .topLeading)

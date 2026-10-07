@@ -20,8 +20,7 @@ final class ShelfStore: ObservableObject {
         let new = urls.filter { !items.contains($0) }
         guard !new.isEmpty else { return }
         items.append(contentsOf: new)
-        SoundEngine.shared.play("pop")
-        NotificationCenter.default.post(name: .triggerEmote, object: BotEmote.happy)
+        MochiCatch.fire(icon: "tray.and.arrow.down.fill", color: "#34D399")
     }
 
     func remove(_ url: URL) { items.removeAll { $0 == url } }

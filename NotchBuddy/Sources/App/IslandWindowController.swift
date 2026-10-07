@@ -18,6 +18,11 @@ final class IslandWindowController: NSWindowController {
     private var spotifySubscription: AnyCancellable?
     /// The drag in progress goes to the shelf (decided when it enters the island).
     private var dragToShelf = false
+    // Fullscreen apps: the island hides with the menu bar and comes back with it.
+    private var fullscreenSpace = false
+    private var fullscreenRevealed = false
+    private var hiddenForFullscreen = false
+    private var lastScreen: NSScreen?
 
     // Confused recovery timer (set by handleDizzy)
     private var confusedRecoveryTimer: DispatchWorkItem?
@@ -164,6 +169,7 @@ final class IslandWindowController: NSWindowController {
         startLocalKeyMonitor()
         startHotKeys()
         wireFSM()
+        startFullscreenWatch()
 
         // Make panel key whenever the prompt/chat view becomes active
         // (nonactivatingPanel never auto-becomes key, but TextField needs it)
@@ -250,6 +256,7 @@ final class IslandWindowController: NSWindowController {
         guard let panel = window as? IslandPanel else { return }
 
         let mouse = NSEvent.mouseLocation
+        if updateFullscreenVisibility(panel: panel, mouse: mouse) { return }
 
         // Convert mouse to panel-local coords (macOS: origin bottom-left)
         let pf = panel.frame
@@ -320,6 +327,67 @@ final class IslandWindowController: NSWindowController {
     }
 
     private var lastMouse: CGPoint = .zero
+
+    // MARK: - Fullscreen spaces (hide with the menu bar)
+
+    private func startFullscreenWatch() {
+        let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification] {
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    // Re-check while the fullscreen animation settles.
+                    for delay: UInt64 in [0, 400_000_000, 800_000_000] {
+                        try? await Task.sleep(nanoseconds: delay)
+                        self?.refreshFullscreenSpace()
+                    }
+                }
+            }
+        }
+        refreshFullscreenSpace()
+    }
+
+    /// A window of another app covering the whole screen, menu bar area included, means the
+    /// space is fullscreen (or the menu bar is auto-hidden over a full-height window).
+    private func refreshFullscreenSpace() {
+        guard let screen = lastScreen ?? NSScreen.main else { return }
+        let primaryH = NSScreen.screens.first?.frame.height ?? screen.frame.height
+        let f = screen.frame
+        let target = CGRect(x: f.minX, y: primaryH - f.maxY, width: f.width, height: f.height)  // CG coords
+        let me = ProcessInfo.processInfo.processIdentifier
+        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+            as? [[String: Any]] ?? []
+        fullscreenSpace = windows.contains { w in
+            guard (w[kCGWindowLayer as String] as? Int) == 0,
+                  (w[kCGWindowOwnerPID as String] as? Int).map(pid_t.init) != me,
+                  let bounds = w[kCGWindowBounds as String] as? NSDictionary,
+                  let rect = CGRect(dictionaryRepresentation: bounds) else { return false }
+            return abs(rect.minX - target.minX) < 2 && abs(rect.minY - target.minY) < 2
+                && abs(rect.width - target.width) < 2 && abs(rect.height - target.height) < 2
+        }
+    }
+
+    /// Returns true while the island is hidden for a fullscreen app. Touching the top edge
+    /// (which also slides the menu bar down) shows it until the cursor moves away again.
+    private func updateFullscreenVisibility(panel: IslandPanel, mouse: NSPoint) -> Bool {
+        var hide = false
+        if fullscreenSpace, state.pendingApproval == nil, !state.fileDragOver, !inAttachDrag, attachDragStart == nil,
+           let frame = (lastScreen ?? panel.screen ?? NSScreen.main)?.frame {
+            let onScreen = mouse.x >= frame.minX && mouse.x <= frame.maxX && mouse.y >= frame.minY
+            let islandH = panel.currentIslandFrame(nw: notchW, nh: notchH).height
+            if onScreen && mouse.y >= frame.maxY - 1 {
+                fullscreenRevealed = true
+            } else if !onScreen || mouse.y < frame.maxY - (NSStatusBar.system.thickness + islandH + 12) {
+                fullscreenRevealed = false
+            }
+            hide = !fullscreenRevealed
+        }
+        if hide != hiddenForFullscreen {
+            hiddenForFullscreen = hide
+            if hide { panel.orderOut(nil) } else { panel.orderFrontRegardless() }
+        }
+        if !hide, let screen = panel.screen { lastScreen = screen }
+        return hide
+    }
 
     // MARK: - Bot-head hover (love emote — mirrors prototype botHover())
 
@@ -1183,8 +1251,14 @@ extension Notification.Name {
 
 // MARK: - islandSize (takes real notch dimensions)
 
-/// Extra height of the compact island while it shows a Spotify lyric line.
+/// Spotify lyric in the compact island: on a notched screen it gets its own row under the
+/// notch (the camera hides the middle); without a notch the island widens and the lyric sits
+/// between Mochi and the mini grid.
 let compactLyricRowHeight: CGFloat = 22
+let compactLyricWidth: CGFloat = 230
+
+@MainActor
+var compactLyricInline: Bool { AppState.shared.spotifyLyricRow && !AppState.shared.hasNotch }
 
 @MainActor
 func islandSize(mode: IslandMode, view: IslandView,
@@ -1193,7 +1267,9 @@ func islandSize(mode: IslandMode, view: IslandView,
                 nh: CGFloat = IslandConst.notchHeight) -> (CGFloat, CGFloat) {
     switch mode {
     case .hidden:   return (nw, nh)
-    case .compact:  return (nw + 160, nh + (AppState.shared.spotifyLyricRow ? compactLyricRowHeight : 0))
+    case .compact:
+        guard AppState.shared.spotifyLyricRow else { return (nw + 160, nh) }
+        return compactLyricInline ? (nw + 160 + compactLyricWidth, nh) : (nw + 160, nh + compactLyricRowHeight)
     case .expanded:
         let layout = IslandConst.viewLayouts[view]!
         return (IslandConst.expandedWidth, layout.height)

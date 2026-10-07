@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = ClipboardHistory.shared   // starts recording only if the user turned it on
         #if !APPSTORE
         _ = SpotifyController.shared
+        _ = DiscordController.shared   // connects only when the user set up a Discord app
         #endif
         #if PHONE_LINK
         CloudProbe.shared.startIfEnabled()

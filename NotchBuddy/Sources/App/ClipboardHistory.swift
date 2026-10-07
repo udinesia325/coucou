@@ -81,6 +81,13 @@ final class ClipboardHistory: ObservableObject {
             return
         }
         insert(Item(content: content, appIcon: NSWorkspace.shared.frontmostApplication?.icon))
+        let icon: String
+        switch content {
+        case .text:  icon = "doc.on.clipboard.fill"
+        case .image: icon = "photo.fill"
+        case .files: icon = "doc.fill"
+        }
+        MochiCatch.fire(icon: icon, color: "#60A5FA")
     }
 
     private func insert(_ item: Item) {

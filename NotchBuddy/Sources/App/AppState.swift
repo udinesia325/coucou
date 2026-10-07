@@ -87,6 +87,10 @@ final class AppState: ObservableObject {
     @Published var claudeModel: String = AppState.defaultClaudeModel {
         didSet { UserDefaults.standard.set(claudeModel, forKey: "claudeModel") }
     }
+    /// Claude Code chat: `--model` alias, "default" = whatever the user's Claude Code uses.
+    @Published var claudeCodeModel: String = UserDefaults.standard.string(forKey: "claudeCodeModel") ?? "default" {
+        didSet { UserDefaults.standard.set(claudeCodeModel, forKey: "claudeCodeModel") }
+    }
 
     // In-chat provider + model — picked via the model selector in the prompt view
     @Published var chatProvider: ChatProvider = .anthropic {
@@ -126,6 +130,12 @@ final class AppState: ObservableObject {
     func fetchModelsIfNeeded(for provider: ChatProvider) {
         guard !loadingProviderModels.contains(provider),
               fetchedProviderModels[provider] == nil else { return }
+        // Claude Code takes model aliases; nothing to fetch.
+        if provider == .claudeCode {
+            fetchedProviderModels[provider] = [("default", "Default"), ("sonnet", "Sonnet"),
+                                               ("opus", "Opus"), ("haiku", "Haiku")]
+            return
+        }
         // Local providers: fetch from server URL (no API key needed)
         if provider.isLocal {
             let baseURL = provider == .ollama ? ollamaServerURL : lmstudioServerURL
@@ -173,7 +183,7 @@ final class AppState: ObservableObject {
             case .anthropic: models = await ClaudeService.fetchModels(apiKey: apiKey)
             case .google:    models = await ClaudeService.fetchGoogleModels(apiKey: apiKey)
             case .openai:    models = await ClaudeService.fetchOpenAIModels(apiKey: apiKey)
-            case .ollama, .lmstudio: models = []  // handled above
+            case .ollama, .lmstudio, .claudeCode: models = []  // handled above
             }
             loadingProviderModels.remove(provider)
             if models.isEmpty {
@@ -193,7 +203,7 @@ final class AppState: ObservableObject {
                     if !models.contains(where: { $0.id == openAIChatModel }) {
                         openAIChatModel = models.first(where: { $0.id.contains("mini") })?.id ?? models.first!.id
                     }
-                case .ollama, .lmstudio: break
+                case .ollama, .lmstudio, .claudeCode: break
                 }
             }
         }
@@ -207,6 +217,7 @@ final class AppState: ObservableObject {
         case .openai:    return openAIChatModel
         case .ollama:    return ollamaChatModel
         case .lmstudio:  return lmstudioChatModel
+        case .claudeCode: return claudeCodeModel
         }
     }
 
@@ -271,8 +282,12 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Default pills (fork): media + chat + GitHub. Resend, n8n and Vercel stay in Settings.
+    static let defaultIntegrations: Set<String> = ["integration_spotify", "integration_discord",
+                                                    "integration_github", "ai_claudecode"]
+
     // Active integration pills (main workspace pill excluded). Max 4.
-    @Published var activeIntegrations: Set<String> = ["integration_resend", "integration_n8n", "integration_vercel", "integration_github"] {
+    @Published var activeIntegrations: Set<String> = AppState.defaultIntegrations {
         didSet {
             if let data = try? JSONEncoder().encode(Array(activeIntegrations)) {
                 UserDefaults.standard.set(data, forKey: "activeIntegrations")
@@ -368,6 +383,9 @@ final class AppState: ObservableObject {
         DispatchQueue.global().asyncAfter(deadline: .now() + 3600, execute: work)
     }
 
+    /// Last thing Mochi caught (clipboard item, shelf file): drives the catch animation.
+    @Published var catchEvent: CatchEvent?
+
     // Spotify (GitHub build; always false in the App Store build, which can't script other apps)
     @Published var spotifyPlaying: Bool = false
     /// Compact island grows by one row to show the current lyric line.
@@ -435,6 +453,15 @@ final class AppState: ObservableObject {
            let a = try? JSONDecoder().decode([String].self, from: d) { n8nWorkflowFilter = Set(a) }
         if let d = ud.data(forKey: "activeIntegrations"),
            let a = try? JSONDecoder().decode([String].self, from: d) { activeIntegrations = Set(a) }
+        // One-time move to the new defaults: drop the old service pills, add the new ones.
+        if !ud.bool(forKey: "pillsDefaultsV2") {
+            var set = activeIntegrations.subtracting(["integration_resend", "integration_n8n", "integration_vercel"])
+            for id in ["integration_spotify", "integration_discord", "integration_github", "ai_claudecode"] where set.count < 4 {
+                set.insert(id)
+            }
+            activeIntegrations = set
+            ud.set(true, forKey: "pillsDefaultsV2")
+        }
         if let v = ud.string(forKey: "mainPill"), !v.isEmpty,
            PillCatalog.available.contains(where: { $0.id == v && $0.category == .workspace && !$0.comingSoon }) {
             mainPillId = v

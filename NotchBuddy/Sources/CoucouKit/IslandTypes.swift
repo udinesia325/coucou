@@ -77,6 +77,8 @@ enum ChatProvider: String, CaseIterable, Codable {
     case openai    = "openai"
     case ollama    = "ollama"
     case lmstudio  = "lmstudio"
+    /// The local `claude` CLI (Claude Code): uses the user's Claude login, no API key.
+    case claudeCode = "claudecode"
 
     var displayName: String {
         switch self {
@@ -85,6 +87,7 @@ enum ChatProvider: String, CaseIterable, Codable {
         case .openai:    "OpenAI"
         case .ollama:    "Ollama"
         case .lmstudio:  "LM Studio"
+        case .claudeCode: "Claude Code"
         }
     }
 
@@ -95,6 +98,7 @@ enum ChatProvider: String, CaseIterable, Codable {
         case .openai:    "#10A37F"
         case .ollama:    "#FACC15"
         case .lmstudio:  "#A3E635"
+        case .claudeCode: "#D97757"
         }
     }
 
@@ -105,6 +109,7 @@ enum ChatProvider: String, CaseIterable, Codable {
         case .openai:    "gpt-4o"
         case .ollama:    "llama3.2"
         case .lmstudio:  "local-model"
+        case .claudeCode: "default"
         }
     }
 
@@ -115,6 +120,7 @@ enum ChatProvider: String, CaseIterable, Codable {
         case .openai:    "openai-api-key"
         case .ollama:    ""
         case .lmstudio:  ""
+        case .claudeCode: ""
         }
     }
 
@@ -129,6 +135,7 @@ enum ChatProvider: String, CaseIterable, Codable {
         case .openai:    "ai_openai"
         case .ollama:    "ai_ollama"
         case .lmstudio:  "ai_lmstudio"
+        case .claudeCode: "ai_claudecode"
         }
     }
 
@@ -139,6 +146,7 @@ enum ChatProvider: String, CaseIterable, Codable {
         case "ai_openai":    self = .openai
         case "ai_ollama":    self = .ollama
         case "ai_lmstudio":  self = .lmstudio
+        case "ai_claudecode": self = .claudeCode
         default:             return nil
         }
     }
