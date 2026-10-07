@@ -108,13 +108,23 @@ struct IslandContainer: View {
 
             Group {
                 if state.mode == .compact {
+                    // With the lyric row, the grid stays in the ear next to the notch.
+                    let earH = state.spotifyLyricRow ? islandHeight - compactLyricRowHeight : islandHeight
                     CompactMiniGrid(state: state)
-                        .scaleEffect(IslandRestingLayout(width: islandWidth, height: islandHeight).miniGridScale)
-                        .position(x: islandWidth - 40, y: islandHeight / 2)
+                        .scaleEffect(IslandRestingLayout(width: islandWidth, height: earH).miniGridScale)
+                        .position(x: islandWidth - 40, y: earH / 2)
                         .transition(.opacity)
                 }
+                #if !APPSTORE
+                if state.mode == .compact && state.spotifyLyricRow {
+                    CompactSpotifyOverlay(islandW: islandWidth, islandH: islandHeight,
+                                          notchH: islandHeight - compactLyricRowHeight)
+                        .transition(.opacity)
+                }
+                #endif
             }
             .animation(.easeInOut(duration: 0.25), value: state.mode == .compact)
+            .animation(.easeInOut(duration: 0.25), value: state.spotifyLyricRow)
         }
         .frame(width: islandWidth, height: islandHeight, alignment: .topLeading)
         .onChangeCompat(of: state.mode) { oldMode, newMode in
@@ -146,6 +156,12 @@ struct IslandContainer: View {
                 islandWidth  = w
                 islandHeight = newView == .prompt ? chatPromptHeight : h
             }
+        }
+        .onChangeCompat(of: state.spotifyLyricRow) { _, _ in
+            guard state.mode == .compact else { return }
+            let (_, h) = islandSize(mode: .compact, view: state.view,
+                                    nw: state.notchWidth, nh: state.notchHeight)
+            withAnimation(openSpring) { islandHeight = h }
         }
         .onChangeCompat(of: state.chatHistory.count) { _, _ in
             guard state.mode == .expanded, state.view == .prompt else { return }
@@ -437,7 +453,7 @@ struct IslandContentView: View {
                     // Views that fill available height instead of the fixed 98pt content frame:
                     // chat (prompt) is always flexible; mail is flexible only when active so
                     // it doesn't push the ZStack taller when inactive.
-                    let isTall = v == .prompt || (v == .mail && active)
+                    let isTall = v == .prompt || ((v == .mail || v == .stats || v == .spotify) && active)
                     let anim: Animation = active
                         ? .spring(response: 0.4, dampingFraction: 0.8).delay(0.16)
                         : .easeIn(duration: 0.16)
@@ -478,6 +494,12 @@ struct IslandHeader: View {
                     #endif
                 })
                 TabButton(icon: "plus", view: .upload, state: state)
+                TabButton(icon: "gauge", view: .stats, state: state)
+                TabButton(icon: "tray.full", view: .shelf, state: state)
+                TabButton(icon: "doc.on.clipboard", view: .clipboard, state: state)
+                #if !APPSTORE
+                TabButton(icon: "music.note", view: .spotify, state: state)
+                #endif
             }
             .padding(.leading, 14)
 

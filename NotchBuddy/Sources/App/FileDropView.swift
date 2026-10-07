@@ -20,17 +20,24 @@ final class FileDropNSView: NSView {
     // Pass all mouse events through — drag-drop uses NSDraggingDestination, not hitTest
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    // Drags that start inside Coucou (a file pulled off the shelf) are not drops.
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard sender.draggingSource == nil else { return [] }
         onDragEntered?(sender.draggingLocation)
         return .copy
     }
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard sender.draggingSource == nil else { return [] }
         onDragUpdated?(sender.draggingLocation)
         return .copy
     }
-    override func draggingExited(_ sender: NSDraggingInfo?) { onDragExited?() }
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        guard sender?.draggingSource == nil else { return }
+        onDragExited?()
+    }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard sender.draggingSource == nil else { return false }
         guard let urls = sender.draggingPasteboard.readObjects(
             forClasses: [NSURL.self],
             options: [.urlReadingFileURLsOnly: true]

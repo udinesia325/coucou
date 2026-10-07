@@ -45,6 +45,9 @@ jobs:
       - name: Wardrobe tests
         run: bash scripts/test-wardrobe.sh
 
+      - name: Lyrics (LRC) tests
+        run: bash scripts/test-lrc.sh
+
       - name: Build
         run: |
           xcodebuild \

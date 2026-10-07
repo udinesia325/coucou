@@ -18,6 +18,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         setupMenuBarItem()
         setupIsland()
+        _ = ClipboardHistory.shared   // starts recording only if the user turned it on
+        #if !APPSTORE
+        _ = SpotifyController.shared
+        #endif
         #if PHONE_LINK
         CloudProbe.shared.startIfEnabled()
         #endif

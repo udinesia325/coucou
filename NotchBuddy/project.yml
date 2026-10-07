@@ -133,6 +133,9 @@ targets:
         NSSupportsAutomaticGraphicsSwitching: YES
         NSAppleEventsUsageDescription: "Pour sauter au terminal, envoyer des mails et piloter Musique."
         NSAccessibilityUsageDescription: "Pour lire le titre de la fenêtre active et l'attacher comme contexte."
+        NSBluetoothAlwaysUsageDescription: "Pour afficher l'état du Bluetooth et les appareils connectés dans Stats."
+        NSLocationUsageDescription: "macOS demande la localisation pour lire le nom du réseau Wi-Fi affiché dans Stats."
+        NSLocationWhenInUseUsageDescription: "macOS demande la localisation pour lire le nom du réseau Wi-Fi affiché dans Stats."
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
     settings:

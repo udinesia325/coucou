@@ -368,6 +368,11 @@ final class AppState: ObservableObject {
         DispatchQueue.global().asyncAfter(deadline: .now() + 3600, execute: work)
     }
 
+    // Spotify (GitHub build; always false in the App Store build, which can't script other apps)
+    @Published var spotifyPlaying: Bool = false
+    /// Compact island grows by one row to show the current lyric line.
+    @Published var spotifyLyricRow: Bool = false
+
     #if !APPSTORE
     @Published var musicPlaying: Bool = false
     @Published var musicAutomationDenied: Bool = false
@@ -531,7 +536,7 @@ final class AppState: ObservableObject {
 
     func syncMode() {
         // If no tasks and not expanded/peek, go hidden
-        if tasks.isEmpty && mode == .compact {
+        if tasks.isEmpty && mode == .compact && !spotifyPlaying {
             mode = .hidden
         } else if !tasks.isEmpty && mode == .hidden && isPresent {
             mode = .compact

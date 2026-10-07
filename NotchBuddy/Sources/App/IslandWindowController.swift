@@ -15,6 +15,9 @@ final class IslandWindowController: NSWindowController {
     private var frameTimer: Timer?
     private var keyMonitor: Any?
     private var viewSubscription: AnyCancellable?
+    private var spotifySubscription: AnyCancellable?
+    /// The drag in progress goes to the shelf (decided when it enters the island).
+    private var dragToShelf = false
 
     // Confused recovery timer (set by handleDizzy)
     private var confusedRecoveryTimer: DispatchWorkItem?
@@ -107,6 +110,15 @@ final class IslandWindowController: NSWindowController {
         dropView.autoresizingMask = [.width, .height]
         dropView.onDragEntered = { [weak self] loc in
             Task { @MainActor in
+                // Shelf catches the drop: no upload animation, just open the shelf.
+                let state = AppState.shared
+                if ShelfStore.shared.catchesDrops || (state.mode == .expanded && state.view == .shelf) {
+                    self?.dragToShelf = true
+                    ShelfStore.shared.isTargeted = true
+                    NotificationCenter.default.post(name: .hookExpand, object: IslandView.shelf)
+                    return
+                }
+                self?.dragToShelf = false
                 let iLoc = self?.windowToIsland(loc) ?? CGPoint(x: 320, y: 88)
                 AppState.shared.fileDragOver = true
                 // enterZone sets isActive=true BEFORE hookExpand triggers re-render,
@@ -118,20 +130,27 @@ final class IslandWindowController: NSWindowController {
         }
         dropView.onDragUpdated = { [weak self] loc in
             Task { @MainActor in
+                guard self?.dragToShelf != true else { return }
                 let iLoc = self?.windowToIsland(loc) ?? CGPoint(x: 320, y: 88)
                 UploadSequenceEngine.shared.updateCursor(x: iLoc.x, y: iLoc.y)
             }
         }
-        dropView.onDragExited = {
+        dropView.onDragExited = { [weak self] in
             Task { @MainActor in
+                if self?.dragToShelf == true { ShelfStore.shared.isTargeted = false; return }
                 AppState.shared.fileDragOver = false
                 // Do NOT collapse — drag session still active; island stays open.
                 NotificationCenter.default.post(name: .botMorphTo, object: CGFloat(0))
                 UploadSequenceEngine.shared.exitZone()
             }
         }
-        dropView.onFilesDropped = { urls in
+        dropView.onFilesDropped = { [weak self] urls in
             Task { @MainActor in
+                if self?.dragToShelf == true {
+                    ShelfStore.shared.isTargeted = false
+                    ShelfStore.shared.add(urls)
+                    return
+                }
                 await FileDropHandler.handle(urls: urls, state: AppState.shared)
             }
         }
@@ -205,6 +224,16 @@ final class IslandWindowController: NSWindowController {
         }
 
         fsm.isHeldOpen = { AppState.shared.pendingApproval != nil }
+        fsm.keepsCompact = { AppState.shared.spotifyPlaying }
+
+        // Spotify stopped: let the compact island time out again as usual.
+        spotifySubscription = state.$spotifyPlaying
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] playing in
+                guard let self, !playing, self.fsm.state == .petit, !self.wasInIsland else { return }
+                self.fsm.mouseLeft()
+            }
     }
 
     // MARK: - 60 Hz polling loop
@@ -494,10 +523,13 @@ final class IslandWindowController: NSWindowController {
         if cmd, let n = digitCodes[event.keyCode] {
             switchToPill(number: n); return true
         }
-        // ⎋ Escape — focused views (.onExitCommand) have first crack; fall back to collapse
+        // ⎋ Escape — a text field being edited has first crack (its .onExitCommand);
+        // otherwise collapse. sendAction can't be the test: the hosting view always
+        // answers cancelOperation:, so it reported "consumed" and Escape never closed.
         if event.keyCode == 53 && raw.isEmpty {
-            let consumed = NSApp.sendAction(Selector(("cancelOperation:")), to: nil, from: nil)
-            if !consumed && state.mode == .expanded && !state.isPinned {
+            if islandPanel.firstResponder is NSTextView {
+                NSApp.sendAction(Selector(("cancelOperation:")), to: nil, from: nil)
+            } else if state.mode == .expanded && !state.isPinned {
                 collapse()
             }
             return true
@@ -581,6 +613,17 @@ final class IslandWindowController: NSWindowController {
                         self.collapse()
                     }
                 }
+            }
+        }
+
+        // Click outside the island folds it. Global mouse monitors only see clicks in
+        // other apps (no Accessibility needed), and the transparent part of the panel
+        // passes clicks through, so any click here is outside the island.
+        NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.state.mode == .expanded, !self.state.isPinned,
+                      !self.inAttachDrag, !self.wasInIsland else { return }
+                self.collapse()   // collapse() itself refuses while an approval holds the island open
             }
         }
 
@@ -1140,13 +1183,17 @@ extension Notification.Name {
 
 // MARK: - islandSize (takes real notch dimensions)
 
+/// Extra height of the compact island while it shows a Spotify lyric line.
+let compactLyricRowHeight: CGFloat = 22
+
+@MainActor
 func islandSize(mode: IslandMode, view: IslandView,
                 progress: Double = 0,
                 nw: CGFloat = IslandConst.notchWidth,
                 nh: CGFloat = IslandConst.notchHeight) -> (CGFloat, CGFloat) {
     switch mode {
     case .hidden:   return (nw, nh)
-    case .compact:  return (nw + 160, nh)
+    case .compact:  return (nw + 160, nh + (AppState.shared.spotifyLyricRow ? compactLyricRowHeight : 0))
     case .expanded:
         let layout = IslandConst.viewLayouts[view]!
         return (IslandConst.expandedWidth, layout.height)

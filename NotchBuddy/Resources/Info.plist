@@ -31,8 +31,14 @@
 	</dict>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Pour sauter au terminal, envoyer des mails et piloter Musique.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Pour afficher l'état du Bluetooth et les appareils connectés dans Stats.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSLocationUsageDescription</key>
+	<string>macOS demande la localisation pour lire le nom du réseau Wi-Fi affiché dans Stats.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>macOS demande la localisation pour lire le nom du réseau Wi-Fi affiché dans Stats.</string>
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
 </dict>

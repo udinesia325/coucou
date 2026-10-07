@@ -45,6 +45,11 @@ struct BotCanvasView: View {
                     ? cgColorFromHex(state.focusTask!.color)
                     : nil
                 #endif
+                // Spotify playing: Mochi turns Spotify green and dances (compact notch, Spotify tab).
+                let spotifyMochi = state.spotifyPlaying
+                    && [BotState.idle, .working, .thinking, .searching, .finished].contains(state.effectiveState)
+                    && (state.mode == .compact || (state.mode == .expanded && state.view == .spotify))
+                if spotifyMochi { engine.bodyColor = cgColorFromHex("#1DB954") }
 
                 // Compute shouldDance per-frame (no observer lag)
                 let dancing: Bool = {
@@ -59,7 +64,7 @@ struct BotCanvasView: View {
                     return false
                     #endif
                 }()
-                engine.setDancing(dancing)
+                engine.setDancing(dancing || spotifyMochi)
                 let isWardrobe = state.mode == .expanded && state.view == .wardrobe
                 let isFocusMain = state.focusId == state.mainPillId || state.focusId == nil
                 let showOutfit = isFocusMain || state.mode != .expanded || isWardrobe

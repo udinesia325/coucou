@@ -26,6 +26,14 @@ struct IslandViewContent: View {
         case .settings:  SettingsIslandView(state: state)
         case .greeting:  EmptyView()  // GreetingCanvasView overlaid in IslandRootView
         case .wardrobe:  WardrobeView(state: state)
+        case .stats:     StatsView(state: state)
+        case .shelf:     ShelfView(state: state)
+        case .clipboard: ClipboardView(state: state)
+        #if !APPSTORE
+        case .spotify:   SpotifyView(state: state)
+        #else
+        case .spotify:   EmptyView()
+        #endif
         }
     }
 }
