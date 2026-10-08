@@ -47,6 +47,7 @@ final class MochiPropState {
 
 extension MochiProp {
     /// Draws in Mochi's canvas, following the body's squash, tilt and head turn.
+    @MainActor
     func draw(in context: GraphicsContext, engine: BotEngine, size: CGSize,
               now t: Double, presence: CGFloat, accent: Color) {
         guard self != .none, engine.morph < 0.3, presence > 0 else { return }
