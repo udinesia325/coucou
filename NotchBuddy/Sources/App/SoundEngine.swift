@@ -9,11 +9,20 @@ final class SoundEngine {
 
     var enabled: Bool = true
     var volume: Float = 0.12 {
-        didSet { players.values.forEach { $0.forEach { $0.volume = volume } } }
+        didSet {
+            let all = Array(players.values), v = volume
+            queue.async { all.forEach { $0.players.forEach { $0.volume = v } } }
+        }
     }
 
+    /// AVAudioPlayer isn't Sendable; every player is only touched on `queue` after preload.
+    private struct Pool: @unchecked Sendable { let players: [AVAudioPlayer] }
+
     // Pool of 3 players per sound to allow overlapping playback
-    private var players: [String: [AVAudioPlayer]] = [:]
+    private var players: [String: Pool] = [:]
+    /// `play()` blocks ~150–200 ms while the audio device wakes up (measured on an Intel Mac):
+    /// on the main thread that froze the island right as it opened.
+    private let queue = DispatchQueue(label: "fr.louisraille.NotchBuddy.sound", qos: .userInteractive)
 
     private init() {
         preload()
@@ -34,7 +43,7 @@ final class SoundEngine {
                     pool.append(p)
                 }
             }
-            if !pool.isEmpty { players[name] = pool }
+            if !pool.isEmpty { players[name] = Pool(players: pool) }
         }
     }
 
@@ -42,13 +51,16 @@ final class SoundEngine {
     /// then stop and reset them so they can be reused.
     func fadeOut(_ name: String, duration: TimeInterval) {
         guard let pool = players[name] else { return }
-        for player in pool where player.isPlaying {
-            player.setVolume(0, fadeDuration: duration)
-            DispatchQueue.main.asyncAfter(deadline: .now() + duration) { [weak player] in
-                guard let p = player else { return }
-                p.stop()
-                p.currentTime = 0
-                p.volume = self.volume
+        let restore = volume, queue = queue
+        queue.async {
+            let fading = Pool(players: pool.players.filter { $0.isPlaying })
+            fading.players.forEach { $0.setVolume(0, fadeDuration: duration) }
+            queue.asyncAfter(deadline: .now() + duration) {
+                for player in fading.players {
+                    player.stop()
+                    player.currentTime = 0
+                    player.volume = restore
+                }
             }
         }
     }
@@ -56,10 +68,13 @@ final class SoundEngine {
     func play(_ name: String) {
         guard enabled && AppState.shared.soundEnabled else { return }
         guard let pool = players[name] else { return }
-        // Find a player that is not currently playing
-        let player = pool.first { !$0.isPlaying } ?? pool[0]
-        player.currentTime = 0
-        player.volume = volume
-        player.play()
+        let volume = volume
+        queue.async {
+            // Find a player that is not currently playing
+            let player = pool.players.first { !$0.isPlaying } ?? pool.players[0]
+            player.currentTime = 0
+            player.volume = volume
+            player.play()
+        }
     }
 }

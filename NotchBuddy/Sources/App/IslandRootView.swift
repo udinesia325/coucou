@@ -452,19 +452,16 @@ struct CountdownBar: View {
     }
 
     private func updateBar() {
-        guard state.mode == .expanded && !state.isPinned else {
-            barWidth = 0
-            return
+        var width: CGFloat = 0
+        if state.mode == .expanded && !state.isPinned {
+            let autoClose = state.autoCloseInterval
+            let window = min(10.0, autoClose * 0.6)
+            let elapsed = Date.now.timeIntervalSince(state.lastActivity)
+            let remaining = autoClose - elapsed
+            if remaining < window { width = max(0, CGFloat(remaining / window) * 160) }
         }
-        let autoClose = state.autoCloseInterval
-        let window = min(10.0, autoClose * 0.6)
-        let elapsed = Date.now.timeIntervalSince(state.lastActivity)
-        let remaining = autoClose - elapsed
-        if remaining < window {
-            barWidth = max(0, CGFloat(remaining / window) * 160)
-        } else {
-            barWidth = 0
-        }
+        // 10×/s: only touch @State when the bar moves, so an idle island isn't re-rendered.
+        if width != barWidth { barWidth = width }
     }
 }
 
@@ -472,6 +469,18 @@ struct CountdownBar: View {
 
 struct IslandContentView: View {
     @ObservedObject var state: AppState
+    /// Views built so far in this opening. Building all ~25 at once made opening the island hang
+    /// on old Macs, and every hidden one re-rendered on each AppState change.
+    @State private var built: Set<IslandView>
+    /// Lags `state.view` by one update when a view is built for the first time, so it is inserted
+    /// hidden and then fades in like the others.
+    @State private var shown: IslandView
+
+    init(state: AppState) {
+        self.state = state
+        _built = State(initialValue: [state.view])
+        _shown = State(initialValue: state.view)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -482,24 +491,34 @@ struct IslandContentView: View {
 
             ZStack {
                 ForEach(IslandView.allCases, id: \.self) { v in
-                    let active = state.view == v
-                    // Views that fill available height instead of the fixed 98pt content frame:
-                    // chat (prompt) is always flexible; mail is flexible only when active so
-                    // it doesn't push the ZStack taller when inactive.
-                    let isTall = v == .prompt || ((v == .mail || v == .stats || v == .spotify
-                                                   || v == .markets || v == .today || v == .notes) && active)
-                    let anim: Animation = active
-                        ? .spring(response: 0.4, dampingFraction: 0.8).delay(0.16)
-                        : .easeIn(duration: 0.16)
-                    IslandViewContent(view: v, state: state)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: isTall ? nil : 98)
-                        .frame(minHeight: (isTall && !active) ? 0 : nil, maxHeight: isTall ? .infinity : nil)
-                        .opacity(active ? 1 : 0)
-                        .scaleEffect(active ? 1 : 0.97)
-                        .allowsHitTesting(active)
-                        .environment(\.islandViewActive, active)
-                        .animation(anim, value: state.view)
+                    if built.contains(v) {
+                        let active = shown == v
+                        // Views that fill available height instead of the fixed 98pt content frame:
+                        // chat (prompt) is always flexible; mail is flexible only when active so
+                        // it doesn't push the ZStack taller when inactive.
+                        let isTall = v == .prompt || ((v == .mail || v == .stats || v == .spotify
+                                                       || v == .markets || v == .today || v == .notes) && active)
+                        let anim: Animation = active
+                            ? .spring(response: 0.4, dampingFraction: 0.8).delay(0.16)
+                            : .easeIn(duration: 0.16)
+                        IslandViewContent(view: v, state: state)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: isTall ? nil : 98)
+                            .frame(minHeight: (isTall && !active) ? 0 : nil, maxHeight: isTall ? .infinity : nil)
+                            .opacity(active ? 1 : 0)
+                            .scaleEffect(active ? 1 : 0.97)
+                            .allowsHitTesting(active)
+                            .environment(\.islandViewActive, active)
+                            .animation(anim, value: shown)
+                    }
+                }
+            }
+            .onChangeCompat(of: state.view) { _, v in
+                if built.contains(v) {
+                    shown = v
+                } else {
+                    built.insert(v)
+                    DispatchQueue.main.async { shown = state.view }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
