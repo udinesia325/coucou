@@ -1,4 +1,5 @@
 import AppKit
+import os
 import Combine
 import SwiftUI
 
@@ -489,10 +490,26 @@ final class IslandWindowController: NSWindowController {
             ? .timingCurve(0.45, 0, 0.2, 1, duration: 0.34)
             : .spring(response: 0.5, dampingFraction: 0.72)
         withAnimation(anim) { state.mode = mode }
-        if mode == .expanded { SoundEngine.shared.play("open") }
+        if mode == .expanded {
+            SoundEngine.shared.play("open")
+            logPanelState("expand")
+        }
         if prev == .expanded {
             SoundEngine.shared.play("close")
             if fsm.isHeldOpen?() != true { state.isPinned = false }
+        }
+    }
+
+    /// Diagnostic for the "click on the island doesn't open it" bug: is the panel still
+    /// considered visible/unoccluded when the island expands? (`log show --predicate 'subsystem == "fr.louisraille.NotchBuddy"'`)
+    private func logPanelState(_ tag: String) {
+        Task { @MainActor [weak self] in
+            for delay: UInt64 in [0, 800_000_000] {
+                try? await Task.sleep(nanoseconds: delay)
+                guard let p = self?.window else { return }
+                let msg = "\(tag) +\(delay / 1_000_000)ms visible=\(p.isVisible) occlusionVisible=\(p.occlusionState.contains(.visible)) onActiveSpace=\(p.isOnActiveSpace) mode=\(AppState.shared.mode) hiddenForFullscreen=\(self?.hiddenForFullscreen ?? false)"
+                Logger(subsystem: "fr.louisraille.NotchBuddy", category: "diag").notice("\(msg, privacy: .public)")
+            }
         }
     }
 

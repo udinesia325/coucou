@@ -17,7 +17,7 @@ struct BotCanvasView: View {
     var body: some View {
         let engine = engine, props = props
         // 30 fps: half the redraws of display rate, same look (old Intel Macs lag at 60).
-        IsolatedAnimation {
+        MochiHost {
             TimelineView(.animation(minimumInterval: 1.0 / 30, paused: state.mode == .hidden)) { timeline in
                 Canvas { context, size in
                     let now = timeline.date.timeIntervalSinceReferenceDate
@@ -228,7 +228,7 @@ struct MiniBotCanvasView: View {
 
     var body: some View {
         let engine = engine, isDancing = isDancing
-        IsolatedAnimation {
+        MochiHost {
             TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !viewActive)) { timeline in
                 Canvas { context, size in
                     let now = timeline.date.timeIntervalSinceReferenceDate
@@ -293,4 +293,18 @@ struct IsolatedAnimation: NSViewRepresentable {
     func makeNSView(context: Context) -> Container { Container(content) }
 
     func updateNSView(_ view: Container, context: Context) { view.host.rootView = content }
+}
+
+/// Diagnostic switch for the "click on the island doesn't open it" bug:
+/// `defaults write fr.louisraille.NotchBuddy isolatedMochi -bool NO` draws Mochi inside the
+/// island's own hosting view again (as before IsolatedAnimation). Default: isolated.
+struct MochiHost<Content: View>: View {
+    private let content: Content
+    private let isolated = UserDefaults.standard.object(forKey: "isolatedMochi") as? Bool ?? true
+
+    init(@ViewBuilder _ content: () -> Content) { self.content = content() }
+
+    var body: some View {
+        if isolated { IsolatedAnimation { content } } else { content }
+    }
 }
