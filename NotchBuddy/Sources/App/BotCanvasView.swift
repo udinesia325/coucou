@@ -12,9 +12,10 @@ struct BotCanvasView: View {
 
     // One engine per view instance (main bot)
     @StateObject private var engine = BotEngine()
+    @State private var props = MochiPropState()
 
     var body: some View {
-        let engine = engine
+        let engine = engine, props = props
         // 30 fps: half the redraws of display rate, same look (old Intel Macs lag at 60).
         IsolatedAnimation {
             TimelineView(.animation(minimumInterval: 1.0 / 30, paused: state.mode == .hidden)) { timeline in
@@ -69,11 +70,21 @@ struct BotCanvasView: View {
                         return false
                         #endif
                     }()
-                    engine.setDancing(dancing || spotifyMochi)
+                    // Any other media playing in the music tab (YouTube, Music…) makes Mochi dance too.
+                    #if !APPSTORE
+                    let mediaDance = state.mode == .expanded && state.view == .spotify
+                        && NowPlaying.shared.isPlaying && !NowPlaying.shared.isSpotify
+                    #else
+                    let mediaDance = false
+                    #endif
+                    engine.setDancing(dancing || spotifyMochi || mediaDance)
+                    // Tab props (headphones, trader visor…) on the island's own Mochi only.
+                    let prop: MochiProp = lookOriginOverride == nil && state.mode == .expanded
+                        ? MochiProp.forView(state.view) : .none
                     let isWardrobe = state.mode == .expanded && state.view == .wardrobe
                     let isFocusMain = state.focusId == state.mainPillId || state.focusId == nil
                     let showOutfit = isFocusMain || state.mode != .expanded || isWardrobe
-                    engine.setOutfit(showOutfit ? state.resolvedOutfit : .none,
+                    engine.setOutfit(prop != .none ? prop.outfit : (showOutfit ? state.resolvedOutfit : .none),
                                      animated: state.view != .wardrobe)
 
                     engine.update(dt: dt)
@@ -99,6 +110,9 @@ struct BotCanvasView: View {
                         engine.draw(context: ctx, size: size)
                         engine.drawOutfitFront(context: ctx, size: size)
                     }
+                    prop.draw(in: ctx, engine: engine, size: size, now: now,
+                              presence: props.presence(of: prop, now: now),
+                              accent: state.spotifyPlaying ? Color(hex: "#1DB954") : Color(hex: "#FF5C8A"))
                     engine.drawHandsAndExtras(context: ctx, size: size)
                 }
             }

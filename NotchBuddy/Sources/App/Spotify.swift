@@ -340,15 +340,25 @@ final class SpotifyController: ObservableObject {
 struct SpotifyView: View {
     @ObservedObject var state: AppState
     @ObservedObject var spotify = SpotifyController.shared
+    @ObservedObject var media = NowPlaying.shared
     @State private var draggingVolume: Double?
 
     private var active: Bool { state.mode == .expanded && state.view == .spotify }
 
+    /// Spotify always wins while it plays. Otherwise whatever else plays (YouTube, Music, VLC…)
+    /// takes the tab, and a paused Spotify comes back when nothing else does.
+    private var showsMedia: Bool {
+        guard media.info != nil, !media.isSpotify, !(spotify.hasTrack && spotify.isPlaying) else { return false }
+        return media.isPlaying || !spotify.hasTrack
+    }
+
     var body: some View {
         ZStack(alignment: .leading) {
-            CardBackground(wash: spotify.isPlaying ? .green : nil)
+            CardBackground(wash: spotify.isPlaying ? .green : (showsMedia && media.isPlaying ? .soft : nil))
             Group {
-                if spotify.automationDenied {
+                if showsMedia {
+                    mediaPlayer
+                } else if spotify.automationDenied {
                     message("Coucou needs permission to control Spotify.",
                             button: "Open Automation Settings") { spotify.openAutomationSettings() }
                 } else if !spotify.hasTrack {
@@ -363,8 +373,117 @@ struct SpotifyView: View {
             .padding(.vertical, 10)
         }
         .task(id: active) {
-            if active { spotify.refresh() }
+            guard active else { return }
+            spotify.refresh()
+            await media.run()
         }
+    }
+
+    // MARK: Other media (Now Playing)
+
+    private var mediaPlayer: some View {
+        HStack(alignment: .top, spacing: 12) {
+            mediaArtwork
+            VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(media.info?.title ?? "").font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    Text(media.info.map { $0.artist.isEmpty ? media.appName : $0.artist } ?? "")
+                        .font(.system(size: 11)).foregroundColor(Color(hex: "#8E939C")).lineLimit(1)
+                }
+                mediaProgress
+                HStack(spacing: 18) {
+                    control("backward.fill", size: 14) { media.previous() }
+                    Button(action: { media.playPause() }) {
+                        Image(systemName: media.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.black)
+                            .frame(width: 30, height: 30)
+                            .background(Circle().fill(Color.white))
+                    }
+                    .buttonStyle(.plain)
+                    control("forward.fill", size: 14) { media.next() }
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .frame(width: 200)
+            mediaSource
+        }
+    }
+
+    private var mediaArtwork: some View {
+        ZStack {
+            if let art = media.artwork {
+                Image(nsImage: art).resizable().aspectRatio(contentMode: .fill)
+            } else {
+                Color.white.opacity(0.06)
+                if let icon = media.app?.icon {
+                    Image(nsImage: icon).resizable().frame(width: 48, height: 48)
+                } else {
+                    Image(systemName: "play.rectangle.fill").font(.system(size: 30)).foregroundColor(Color(hex: "#C5C8CD"))
+                }
+            }
+        }
+        .frame(width: 112, height: 112)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .onTapGesture { media.openApp() }
+    }
+
+    private var mediaProgress: some View {
+        TimelineView(.periodic(from: .now, by: active && media.isPlaying ? 0.5 : 3600)) { ctx in
+            let pos = media.position(at: ctx.date)
+            let duration = media.info?.duration ?? 0
+            VStack(spacing: 2) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.white.opacity(0.12))
+                        Capsule().fill(Color.white.opacity(0.85))
+                            .frame(width: geo.size.width * CGFloat(duration > 0 ? pos / duration : 0))
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 0).onEnded { g in
+                        guard duration > 0 else { return }
+                        media.seek(to: max(0, min(1, g.location.x / geo.size.width)) * duration)
+                    })
+                }
+                .frame(height: 4)
+                HStack {
+                    Text(Self.time(pos))
+                    Spacer()
+                    Text(duration > 0 ? Self.time(duration) : "Live")
+                }
+                .font(.system(size: 9).monospacedDigit())
+                .foregroundColor(Color(hex: "#6B7079"))
+            }
+        }
+    }
+
+    /// Where it plays, and a reminder that Spotify comes first.
+    private var mediaSource: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Now Playing").font(.system(size: 10, weight: .semibold)).foregroundColor(Color(hex: "#6B7079"))
+            Button(action: { media.openApp() }) {
+                HStack(spacing: 8) {
+                    if let icon = media.app?.icon {
+                        Image(nsImage: icon).resizable().frame(width: 28, height: 28)
+                    }
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(media.appName).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                        Text(media.isPlaying ? "Playing" : "Paused")
+                            .font(.system(size: 10)).foregroundColor(Color(hex: "#8E939C"))
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            Spacer(minLength: 0)
+            HStack(spacing: 5) {
+                Image(systemName: "music.note").font(.system(size: 9)).foregroundColor(SpotifyController.green)
+                Text(spotify.hasTrack ? "Spotify takes over when it plays." : "Spotify comes first when it plays.")
+                    .font(.system(size: 10)).foregroundColor(Color(hex: "#6B7079"))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func message(_ text: String, button: String, action: @escaping () -> Void) -> some View {

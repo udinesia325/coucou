@@ -24,6 +24,49 @@ final class MarketsStore: ObservableObject {
         ("USDIDR=X", "USD/IDR"), ("EURIDR=X", "EUR/IDR"), ("SGDIDR=X", "SGD/IDR"), ("JPYIDR=X", "JPY/IDR"),
     ]
 
+    /// One instrument on the World indexes / FX slides.
+    struct Ticker: Identifiable, Sendable {
+        let symbol: String     // Yahoo symbol
+        let label: String
+        let sub: String
+        /// Fixed decimals (FX majors); nil = Stocks style (none from 1,000 up, two below).
+        var digits: Int? = nil
+        var id: String { symbol }
+    }
+
+    static let indexGroups: [(title: String, tickers: [Ticker])] = [
+        ("Asia", [Ticker(symbol: "^JKSE", label: "IHSG", sub: "🇮🇩 Indonesia"),
+                  Ticker(symbol: "^N225", label: "Nikkei 225", sub: "🇯🇵 Japan"),
+                  Ticker(symbol: "^KS11", label: "KOSPI", sub: "🇰🇷 Korea"),
+                  Ticker(symbol: "000001.SS", label: "SSE Composite", sub: "🇨🇳 China")]),
+        ("United States", [Ticker(symbol: "^GSPC", label: "S&P 500", sub: "🇺🇸 500 large caps"),
+                           Ticker(symbol: "^IXIC", label: "Nasdaq", sub: "🇺🇸 Composite"),
+                           Ticker(symbol: "^DJI", label: "Dow Jones", sub: "🇺🇸 30 industrials")]),
+        ("Europe", [Ticker(symbol: "^FTSE", label: "FTSE 100", sub: "🇬🇧 London"),
+                    Ticker(symbol: "^GDAXI", label: "DAX", sub: "🇩🇪 Frankfurt"),
+                    Ticker(symbol: "^FCHI", label: "CAC 40", sub: "🇫🇷 Paris"),
+                    Ticker(symbol: "^STOXX50E", label: "Euro Stoxx 50", sub: "🇪🇺 Eurozone")]),
+    ]
+
+    static let fxGroups: [(title: String, tickers: [Ticker])] = [
+        ("Forex", [Ticker(symbol: "EURUSD=X", label: "EUR/USD", sub: "Euro", digits: 4),
+                   Ticker(symbol: "GBPUSD=X", label: "GBP/USD", sub: "Cable", digits: 4),
+                   Ticker(symbol: "JPY=X", label: "USD/JPY", sub: "Yen"),
+                   Ticker(symbol: "AUDUSD=X", label: "AUD/USD", sub: "Aussie", digits: 4)]),
+        // ponytail: Yahoo has no spot metals or Brent; front-month futures stand in (price +
+        // intraday line). Spot gold/silver from gold-api.com replaces the price when it answers.
+        ("Commodities", [Ticker(symbol: "GC=F", label: "XAU/USD", sub: "Gold"),
+                         Ticker(symbol: "SI=F", label: "XAG/USD", sub: "Silver"),
+                         Ticker(symbol: "BZ=F", label: "XBR/USD", sub: "Brent oil")]),
+        ("Crypto", [Ticker(symbol: "BTC-USD", label: "BTC", sub: "Bitcoin"),
+                    Ticker(symbol: "ETH-USD", label: "ETH", sub: "Ethereum"),
+                    Ticker(symbol: "SOL-USD", label: "SOL", sub: "Solana")]),
+    ]
+
+    /// Quotes for the World indexes / FX slides, by Yahoo symbol.
+    @Published private(set) var board: [String: Quote] = [:]
+    @Published private(set) var silverSpot: Double?
+
     @Published private(set) var watchlist: [Quote] = []
     @Published private(set) var rates: [Quote] = []
     @Published private(set) var goldSpot: Double?
@@ -31,12 +74,30 @@ final class MarketsStore: ObservableObject {
     @Published private(set) var lastUpdate: Date?
     @Published private(set) var failed = false
 
-    /// Refreshes every 60 s while the Markets tab is on screen.
-    func run() async {
+    /// Refreshes the visible slide every 60 s while the Markets tab is on screen.
+    func run(page: Int = 0) async {
         while !Task.isCancelled {
-            await refresh()
+            switch page {
+            case 1: await refreshBoard(Self.indexGroups)
+            case 2: await refreshBoard(Self.fxGroups)
+            default: await refresh()
+            }
             try? await Task.sleep(nanoseconds: 60_000_000_000)
         }
+    }
+
+    private func refreshBoard(_ groups: [(title: String, tickers: [Ticker])]) async {
+        let symbols = groups.flatMap { $0.tickers.map(\.symbol) }
+        let metals = groups.contains { $0.title == "Commodities" }
+        async let list = Self.quotes(symbols)
+        async let gold = metals ? Self.goldPrice() : nil
+        async let silver = metals ? Self.spotPrice("XAG") : nil
+        let (quotes, g, sv) = await (list, gold, silver)
+        for q in quotes { board[q.symbol] = q }
+        if let g { goldSpot = g }
+        if let sv { silverSpot = sv }
+        failed = quotes.isEmpty
+        lastUpdate = Date()
     }
 
     func refresh() async {
@@ -83,8 +144,10 @@ final class MarketsStore: ObservableObject {
         return Quote(symbol: symbol, name: name, price: price, previousClose: previous, closes: closes)
     }
 
-    nonisolated static func goldPrice() async -> Double? {
-        guard let url = URL(string: "https://api.gold-api.com/price/XAU"),
+    nonisolated static func goldPrice() async -> Double? { await spotPrice("XAU") }
+
+    nonisolated static func spotPrice(_ metal: String) async -> Double? {
+        guard let url = URL(string: "https://api.gold-api.com/price/\(metal)"),
               let (data, _) = try? await URLSession.shared.data(from: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return json["price"] as? Double
@@ -96,10 +159,10 @@ final class MarketsStore: ObservableObject {
     }
 
     /// Stocks-app style: no decimals from 1,000 up, two below; grouping follows the Mac's locale.
-    static func format(_ v: Double, signed: Bool = false) -> String {
+    static func format(_ v: Double, signed: Bool = false, digits fixed: Int? = nil) -> String {
         let f = NumberFormatter()
         f.numberStyle = .decimal
-        let digits = abs(v) >= 1000 ? 0 : 2
+        let digits = fixed ?? (abs(v) >= 1000 ? 0 : 2)
         f.minimumFractionDigits = digits
         f.maximumFractionDigits = digits
         if signed { f.positivePrefix = "+" }
@@ -112,43 +175,120 @@ final class MarketsStore: ObservableObject {
 struct MarketsView: View {
     @ObservedObject var state: AppState
     @ObservedObject var store = MarketsStore.shared
+    /// 0 watchlist, 1 world indexes, 2 forex · commodities · crypto.
+    @State private var page = 0
 
     private var active: Bool { state.mode == .expanded && state.view == .markets }
 
     var body: some View {
         ZStack(alignment: .leading) {
             CardBackground(wash: nil)
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Watchlist").font(.system(size: 11, weight: .semibold))
-                        Text(store.fromStocksApp ? "from Stocks" : "default list")
-                            .font(.system(size: 10)).foregroundColor(Color(hex: "#6B7079"))
-                        Spacer()
-                        if let t = store.lastUpdate {
-                            Text(t, style: .time).font(.system(size: 9.5)).foregroundColor(Color(hex: "#6B7079"))
-                        }
-                    }
-                    if store.watchlist.isEmpty {
-                        Text(store.failed ? "Can't reach Yahoo Finance." : "Loading quotes…")
-                            .font(.system(size: 11)).foregroundColor(Color(hex: "#8E939C"))
-                            .frame(maxHeight: .infinity)
-                    } else {
-                        ScrollView(showsIndicators: false) {
-                            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 2) {
-                                ForEach(store.watchlist) { QuoteRow(quote: $0) }
-                            }
-                        }
-                    }
+            Group {
+                switch page {
+                case 1: board(MarketsStore.indexGroups)
+                case 2: board(MarketsStore.fxGroups)
+                default: watchlistSlide
                 }
-                ratesColumn.frame(width: 150)
             }
+            .id(page)
+            .transition(.opacity)
             .padding(.leading, 84)
             .padding(.trailing, 14)
             .padding(.vertical, 10)
         }
-        .task(id: active) {
-            if active { await store.run() }
+        // Top right on every slide (beside "Kurs & Gold" on the first), so ‹ › never move.
+        .overlay(alignment: .topTrailing) { pager.padding(.trailing, 20).padding(.top, 16) }
+        .task(id: active ? page : -1) {
+            if active { await store.run(page: page) }
+        }
+    }
+
+    // MARK: Pager (loops)
+
+    private var pager: some View {
+        HStack(spacing: 4) {
+            pagerButton("chevron.left") { (page + 2) % 3 }
+            ForEach(0..<3, id: \.self) { i in
+                Circle().fill(Color.white.opacity(i == page ? 0.85 : 0.22)).frame(width: 4.5, height: 4.5)
+            }
+            pagerButton("chevron.right") { (page + 1) % 3 }
+        }
+        .padding(.horizontal, 4)
+        .background(Capsule().fill(Color.white.opacity(0.06)))
+    }
+
+    private func pagerButton(_ icon: String, to target: @escaping () -> Int) -> some View {
+        Button(action: {
+            withAnimation(.easeInOut(duration: 0.2)) { page = target() }
+        }) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(Color(hex: "#C5C8CD"))
+                .frame(width: 14, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Slide 1 — watchlist (unchanged)
+
+    private var watchlistSlide: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Watchlist").font(.system(size: 11, weight: .semibold))
+                    Text(store.fromStocksApp ? "from Stocks" : "default list")
+                        .font(.system(size: 10)).foregroundColor(Color(hex: "#6B7079"))
+                    Spacer()
+                    if let t = store.lastUpdate {
+                        Text(t, style: .time).font(.system(size: 9.5)).foregroundColor(Color(hex: "#6B7079"))
+                    }
+                }
+                if store.watchlist.isEmpty {
+                    Text(store.failed ? "Can't reach Yahoo Finance." : "Loading quotes…")
+                        .font(.system(size: 11)).foregroundColor(Color(hex: "#8E939C"))
+                        .frame(maxHeight: .infinity)
+                } else {
+                    ScrollView(showsIndicators: false) {
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 2) {
+                            ForEach(store.watchlist) { QuoteRow(quote: $0) }
+                        }
+                    }
+                }
+            }
+            ratesColumn.frame(width: 150)
+        }
+    }
+
+    // MARK: Slides 2 and 3 — one column per group (the group titles head the slide)
+
+    private func board(_ groups: [(title: String, tickers: [MarketsStore.Ticker])]) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            ForEach(groups.indices, id: \.self) { i in
+                let group = groups[i]
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(group.title.uppercased())
+                        .font(.system(size: 8.5, weight: .bold)).tracking(0.6)
+                        .foregroundColor(Color(hex: "#6B7079"))
+                        .padding(.bottom, 3)
+                    ForEach(group.tickers) { t in
+                        BoardRow(ticker: t, quote: store.board[t.symbol], spot: spot(t))
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+        }
+        // Group titles line up with the pager, rows start below it.
+        .padding(.top, 8)
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private func spot(_ t: MarketsStore.Ticker) -> Double? {
+        switch t.symbol {
+        case "GC=F": return store.goldSpot
+        case "SI=F": return store.silverSpot
+        default: return nil
         }
     }
 
@@ -209,6 +349,45 @@ private struct QuoteRow: View {
             .fixedSize()
         }
         .padding(.vertical, 4)
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.05)).frame(height: 1) }
+    }
+}
+
+/// Compact row for the World indexes / FX slides: label, sparkline, price and % change.
+private struct BoardRow: View {
+    let ticker: MarketsStore.Ticker
+    let quote: Quote?
+    var spot: Double?
+
+    private var pct: Double? {
+        guard let q = quote, q.previousClose != 0 else { return nil }
+        return q.change / q.previousClose * 100
+    }
+    private var color: Color { (pct ?? 0) >= 0 ? Color(hex: "#34D399") : Color(hex: "#F4505E") }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(ticker.label).font(.system(size: 10.5, weight: .bold))
+                Text(ticker.sub).font(.system(size: 8.5)).foregroundColor(Color(hex: "#8E939C"))
+            }
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let q = quote {
+                Sparkline(values: q.closes, baseline: q.previousClose, color: color)
+                    .frame(width: 26, height: 14)
+            }
+            VStack(alignment: .trailing, spacing: 0) {
+                Text((spot ?? quote?.price).map { MarketsStore.format($0, digits: ticker.digits) } ?? "—")
+                    .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
+                Text(pct.map { String(format: "%+.2f%%", $0) } ?? " ")
+                    .font(.system(size: 9, weight: .medium).monospacedDigit())
+                    .foregroundColor(color)
+            }
+            .lineLimit(1)
+            .fixedSize()
+        }
+        .padding(.vertical, 1.5)
         .overlay(alignment: .bottom) { Rectangle().fill(Color.white.opacity(0.05)).frame(height: 1) }
     }
 }
