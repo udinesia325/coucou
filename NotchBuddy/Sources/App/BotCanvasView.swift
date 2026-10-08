@@ -50,12 +50,16 @@ struct BotCanvasView: View {
                         ? cgColorFromHex(state.focusTask!.color)
                         : nil
                     #endif
-                    // Spotify playing: Mochi turns Spotify green and dances (compact notch, Spotify tab).
+                    // Home keeps the colour of the selected pill; every other tab shows the original white Mochi.
+                    if state.mode == .expanded && state.view != .overview { engine.bodyColor = nil }
+                    // Spotify playing: Mochi turns Spotify green (compact notch, Home) and dances.
                     let spotifyMochi = state.spotifyPlaying
                         && [BotState.idle, .working, .thinking, .searching, .finished].contains(state.effectiveState)
                         && (state.mode == .compact || (state.mode == .expanded
                             && (state.view == .spotify || (state.view == .overview && state.focusId == "integration_spotify"))))
-                    if spotifyMochi { engine.bodyColor = cgColorFromHex("#1DB954") }
+                    if spotifyMochi && !(state.mode == .expanded && state.view == .spotify) {
+                        engine.bodyColor = cgColorFromHex("#1DB954")
+                    }
 
                     // Compute shouldDance per-frame (no observer lag)
                     let dancing: Bool = {
@@ -78,6 +82,13 @@ struct BotCanvasView: View {
                     let mediaDance = false
                     #endif
                     engine.setDancing(dancing || spotifyMochi || mediaDance)
+                    // Anything playing in the music tab (Spotify or other media): headphones thump, hands pump.
+                    #if !APPSTORE
+                    let mediaPlaying = state.mode == .expanded && state.view == .spotify
+                        && (state.spotifyPlaying || NowPlaying.shared.isPlaying)
+                    #else
+                    let mediaPlaying = false
+                    #endif
                     // Tab props (headphones, trader visor…) on the island's own Mochi only.
                     let prop: MochiProp = lookOriginOverride == nil && state.mode == .expanded
                         ? MochiProp.forView(state.view) : .none
@@ -112,7 +123,8 @@ struct BotCanvasView: View {
                     }
                     prop.draw(in: ctx, engine: engine, size: size, now: now,
                               presence: props.presence(of: prop, now: now),
-                              accent: state.spotifyPlaying ? Color(hex: "#1DB954") : Color(hex: "#FF5C8A"))
+                              accent: Color(hex: "#1DB954"),
+                              groove: props.groove(playing: mediaPlaying, now: now))
                     engine.drawHandsAndExtras(context: ctx, size: size)
                 }
             }
