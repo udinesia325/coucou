@@ -53,12 +53,16 @@ enum Keychain {
     }
 }
 
-// MARK: - Keychain cache (reads each key ONCE at launch; all subsequent access via dict)
+// MARK: - Credential store (~/.coucou/settings.json)
 
+/// Credentials live in ~/.coucou/settings.json (dir 0700, file 0600) so they survive quit and
+/// reinstall. Not the Keychain: its items become unreadable when the app's signature changes.
+/// The Keychain is read once, only when the file doesn't exist yet, to migrate existing keys.
 final class KeychainStore: @unchecked Sendable {
     static let shared = KeychainStore()
     private var cache: [String: String] = [:]
     private let lock = NSLock()
+    private let fileURL: URL
 
     private static let allKeys = [
         "anthropic-api-key",
@@ -73,32 +77,52 @@ final class KeychainStore: @unchecked Sendable {
         "notion-api-key",
     ]
 
-    private init() {
-        // Called once, on main thread (AppDelegate triggers shared at launch).
-        for key in Self.allKeys {
-            if let v = Keychain.load(key: key) { cache[key] = v }
+    init(fileURL: URL = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".coucou/settings.json")) {
+        self.fileURL = fileURL
+        guard let data = try? Data(contentsOf: fileURL) else {
+            // First run: migrate whatever the Keychain still holds.
+            for key in Self.allKeys {
+                if let v = Keychain.load(key: key) { cache[key] = v }
+            }
+            if !cache.isEmpty { save() }
+            return
+        }
+        if let dict = try? JSONDecoder().decode([String: String].self, from: data) {
+            cache = dict
+        } else {
+            // Corrupt JSON: keep it for the user, never overwrite it silently.
+            let bad = fileURL.appendingPathExtension("bad")
+            try? FileManager.default.removeItem(at: bad)
+            try? FileManager.default.moveItem(at: fileURL, to: bad)
         }
     }
 
-    /// Thread-safe read — never touches the Keychain.
+    /// Thread-safe read from memory.
     func get(_ key: String) -> String? {
         lock.withLock { cache[key] }
     }
 
-    /// Updates cache + persists to Keychain.
     func set(_ key: String, value: String) {
         lock.withLock { cache[key] = value }
-        Keychain.save(key: key, value: value)
+        save()
     }
 
-    /// Removes from cache + Keychain only if the key was previously set.
     func remove(_ key: String) {
-        let had = lock.withLock { () -> Bool in
-            let exists = cache[key] != nil
-            cache[key] = nil
-            return exists
-        }
-        if had { Keychain.delete(key: key) }
+        let had = lock.withLock { cache.removeValue(forKey: key) != nil }
+        if had { save() }
+    }
+
+    private func save() {
+        let snapshot = lock.withLock { cache }
+        let dir = fileURL.deletingLastPathComponent()
+        guard let data = try? JSONEncoder().encode(snapshot) else { return }
+        try? FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        // Create 0600 first, then replace atomically, so the secret is never world-readable.
+        let tmp = dir.appendingPathComponent(".settings.json.tmp")
+        FileManager.default.createFile(atPath: tmp.path, contents: data, attributes: [.posixPermissions: 0o600])
+        _ = try? FileManager.default.replaceItemAt(fileURL, withItemAt: tmp)
     }
 }
 
