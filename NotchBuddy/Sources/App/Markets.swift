@@ -183,21 +183,27 @@ struct MarketsView: View {
     var body: some View {
         ZStack(alignment: .leading) {
             CardBackground(wash: nil)
-            Group {
-                switch page {
-                case 1: board(MarketsStore.indexGroups)
-                case 2: board(MarketsStore.fxGroups)
-                default: watchlistSlide
+            // [‹] cards [›]: the arrows hug the left and right edges, the cards fill the middle.
+            HStack(spacing: 4) {
+                pagerButton("chevron.left") { (page + 2) % 3 }
+                Group {
+                    switch page {
+                    case 1: board(MarketsStore.indexGroups)
+                    case 2: board(MarketsStore.fxGroups)
+                    default: watchlistSlide
+                    }
                 }
+                .id(page)
+                .transition(.opacity)
+                .frame(maxWidth: .infinity)
+                pagerButton("chevron.right") { (page + 1) % 3 }
             }
-            .id(page)
-            .transition(.opacity)
-            .padding(.leading, 84)
-            .padding(.trailing, 14)
+            .padding(.leading, 80)
+            .padding(.trailing, 8)
             .padding(.vertical, 10)
         }
-        // Top right on every slide (beside "Kurs & Gold" on the first), so ‹ › never move.
-        .overlay(alignment: .topTrailing) { pager.padding(.trailing, 20).padding(.top, 16) }
+        // Page dots stay top right on every slide (beside "Kurs & Gold" on the first).
+        .overlay(alignment: .topTrailing) { pagerDots.padding(.trailing, 30).padding(.top, 16) }
         .task(id: active ? page : -1) {
             if active { await store.run(page: page) }
         }
@@ -205,26 +211,26 @@ struct MarketsView: View {
 
     // MARK: Pager (loops)
 
-    private var pager: some View {
+    private var pagerDots: some View {
         HStack(spacing: 4) {
-            pagerButton("chevron.left") { (page + 2) % 3 }
             ForEach(0..<3, id: \.self) { i in
                 Circle().fill(Color.white.opacity(i == page ? 0.85 : 0.22)).frame(width: 4.5, height: 4.5)
             }
-            pagerButton("chevron.right") { (page + 1) % 3 }
         }
-        .padding(.horizontal, 4)
-        .background(Capsule().fill(Color.white.opacity(0.06)))
+        .allowsHitTesting(false)
     }
 
+    /// Full-height edge button: a big target at each side of the cards.
     private func pagerButton(_ icon: String, to target: @escaping () -> Int) -> some View {
         Button(action: {
             withAnimation(.easeInOut(duration: 0.2)) { page = target() }
         }) {
             Image(systemName: icon)
-                .font(.system(size: 9, weight: .bold))
+                .font(.system(size: 11, weight: .bold))
                 .foregroundColor(Color(hex: "#C5C8CD"))
-                .frame(width: 14, height: 16)
+                .frame(width: 18)
+                .frame(maxHeight: .infinity)
+                .background(RoundedRectangle(cornerRadius: 9).fill(Color.white.opacity(0.06)))
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
