@@ -193,7 +193,7 @@ final class IslandWindowController: NSWindowController {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] newView in
                 guard let self else { return }
-                if newView == .prompt || newView == .notes {
+                if newView == .prompt || newView == .notes || newView == .devtools {
                     self.islandPanel.makeKey()
                 }
             }

@@ -31,6 +31,8 @@ struct IslandViewContent: View {
         case .clipboard: ClipboardView(state: state)
         case .markets:   MarketsView(state: state)
         case .notes:     NotesView(state: state)
+        case .devtools:  DevToolsView(state: state)
+        case .advstats:  AdvancedStatsView(state: state)
         #if !APPSTORE
         case .spotify:   SpotifyView(state: state)
         case .today:     TodayView(state: state)

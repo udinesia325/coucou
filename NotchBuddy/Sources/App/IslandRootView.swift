@@ -497,7 +497,8 @@ struct IslandContentView: View {
                         // chat (prompt) is always flexible; mail is flexible only when active so
                         // it doesn't push the ZStack taller when inactive.
                         let isTall = v == .prompt || ((v == .mail || v == .stats || v == .spotify
-                                                       || v == .markets || v == .today || v == .notes) && active)
+                                                       || v == .markets || v == .today || v == .notes
+                                                       || v == .devtools || v == .advstats) && active)
                         let anim: Animation = active
                             ? .spring(response: 0.4, dampingFraction: 0.8).delay(0.16)
                             : .easeIn(duration: 0.16)
@@ -539,12 +540,13 @@ struct IslandHeader: View {
     static let tabs: [(icon: String, view: IslandView)] = {
         var t: [(icon: String, view: IslandView)] = [
             ("house.fill", .overview), ("bubble.left.fill", .prompt), ("plus", .upload),
-            ("gauge", .stats), ("tray.full", .shelf), ("doc.on.clipboard", .clipboard),
+            ("gauge", .stats), ("waveform.path.ecg", .advstats), ("tray.full", .shelf), ("doc.on.clipboard", .clipboard),
         ]
         #if !APPSTORE
         t += [("music.note", .spotify), ("sun.max", .today)]
         #endif
-        t += [("chart.line.uptrend.xyaxis", .markets), ("checklist", .notes)]
+        t += [("chart.line.uptrend.xyaxis", .markets), ("checklist", .notes),
+              ("chevron.left.forwardslash.chevron.right", .devtools)]
         return t
     }()
 

@@ -7,7 +7,7 @@ import SwiftUI
 /// for markets, glasses and a live chart for stats… Main Mochi only, expanded island only.
 /// On these tabs the prop replaces the outfit chosen in the wardrobe; Home keeps the outfit.
 enum MochiProp: Equatable {
-    case none, chat, analyst, courier, clipboard, headphones, calendar, candles, memo, hardHat
+    case none, chat, analyst, courier, clipboard, headphones, calendar, candles, memo, hardHat, coder, doctor
 
     static func forView(_ view: IslandView) -> MochiProp {
         switch view {
@@ -20,6 +20,8 @@ enum MochiProp: Equatable {
         case .markets:   return .candles
         case .notes:     return .memo
         case .settings:  return .hardHat
+        case .devtools:  return .coder
+        case .advstats:  return .doctor
         default:         return .none
         }
     }
@@ -412,6 +414,144 @@ extension MochiProp {
             gear.fill(Path(ellipseIn: CGRect(x: -r, y: -r, width: r * 2, height: r * 2)), with: .color(Color(hex: "#9CA3AF")))
             gear.fill(Path(ellipseIn: CGRect(x: -r * 0.4, y: -r * 0.4, width: r * 0.8, height: r * 0.8)),
                       with: .color(Color(hex: "#1E2230")))
+
+        case .coder:
+            // Types on a laptop (lid with a </> sticker), screen glow on the face, a code bubble
+            // filling in line by line with a blinking cursor, and a ✓ when the snippet "compiles".
+            let glow = 0.10 + 0.06 * sin(t * 3)
+            ctx.fill(Path(ellipseIn: CGRect(x: -rx, y: -ry, width: rx * 2, height: ry * 2)),
+                     with: .radialGradient(Gradient(colors: [Color(hex: "#22D3EE").opacity(glow), .clear]),
+                                           center: CGPoint(x: 0, y: ry * 0.4), startRadius: 0, endRadius: rx * 1.1))
+            var lap = Self.popped(ctx, at: CGPoint(x: 0, y: ry * 0.98), pop)
+            lap.translateBy(x: 0, y: ry * 0.98)
+            let lw = R * 1.3, lh = R * 0.62
+            let lid = Path(roundedRect: CGRect(x: -lw / 2, y: -lh, width: lw, height: lh), cornerRadius: R * 0.08)
+            lap.fill(lid, with: .color(Color(hex: "#2A2E38")))
+            lap.stroke(lid, with: .color(Color(hex: "#4B5263")), lineWidth: R * 0.035)
+            lap.fill(Path(roundedRect: CGRect(x: -lw * 0.62, y: -R * 0.02, width: lw * 1.24, height: R * 0.1), cornerRadius: R * 0.05),
+                     with: .color(Color(hex: "#3A4050")))
+            lap.draw(Text("</>").font(.system(size: R * 0.34, weight: .heavy, design: .monospaced))
+                        .foregroundColor(Color(hex: "#22D3EE")),
+                     at: CGPoint(x: 0, y: -lh / 2))
+            for sd: CGFloat in [-1, 1] {
+                let tap = CGFloat(max(0, sin(t * 14 + (sd > 0 ? .pi : 0)))) * R * 0.08
+                Self.hand(lap, at: CGPoint(x: sd * lw * 0.5, y: -R * 0.03 - tap), r: R * 0.17)
+            }
+            var b = Self.popped(ctx, at: CGPoint(x: rx * 0.55, y: -ry * 1.75), pop)
+            b.translateBy(x: rx * 0.55, y: -ry * 1.75 + bob)
+            let bw = R * 1.25, bh = R * 0.8
+            let box = CGRect(x: -bw / 2, y: -bh / 2, width: bw, height: bh)
+            b.fill(Path(roundedRect: box, cornerRadius: R * 0.14), with: .color(Color(hex: "#1E2230")))
+            b.stroke(Path(roundedRect: box, cornerRadius: R * 0.14), with: .color(.white.opacity(0.3)), lineWidth: R * 0.035)
+            let cycle = (t * 0.8).truncatingRemainder(dividingBy: 4.5)    // 3 lines, ✓, pause
+            let colors = ["#C084FC", "#60A5FA", "#34D399"], lens: [CGFloat] = [0.55, 0.8, 0.45]
+            var cursor = CGPoint(x: box.minX + bw * 0.14, y: box.minY + bh * 0.25)
+            for i in 0..<3 {
+                let f = CGFloat(min(1, max(0, cycle - Double(i))))
+                guard f > 0 else { break }
+                let x0 = box.minX + bw * (i == 1 ? 0.24 : 0.14), y = box.minY + bh * (0.25 + CGFloat(i) * 0.25)
+                let w = bw * lens[i] * f
+                var line = Path()
+                line.move(to: CGPoint(x: x0, y: y))
+                line.addLine(to: CGPoint(x: x0 + w, y: y))
+                b.stroke(line, with: .color(Color(hex: colors[i])), style: StrokeStyle(lineWidth: R * 0.08, lineCap: .round))
+                cursor = CGPoint(x: x0 + w + R * 0.07, y: y)
+            }
+            if (t * 2).truncatingRemainder(dividingBy: 1) < 0.55 {
+                b.fill(Path(CGRect(x: cursor.x, y: cursor.y - R * 0.07, width: R * 0.05, height: R * 0.14)), with: .color(.white))
+            }
+            let check = cycle - 3.1
+            if check > 0 && check < 1.2 {
+                let s = CGFloat(min(1, check * 4))
+                var k = ctx
+                k.opacity = ctx.opacity * (check > 0.9 ? 1 - (check - 0.9) / 0.3 : 1)
+                k.translateBy(x: -rx * 0.95, y: -ry * 1.25 - CGFloat(check) * R * 0.25)
+                k.scaleBy(x: max(0.001, s), y: max(0.001, s))
+                k.fill(Path(ellipseIn: CGRect(x: -R * 0.2, y: -R * 0.2, width: R * 0.4, height: R * 0.4)),
+                       with: .color(Color(hex: "#34D399")))
+                var tick = Path()
+                tick.move(to: CGPoint(x: -R * 0.09, y: 0))
+                tick.addLine(to: CGPoint(x: -R * 0.02, y: R * 0.07))
+                tick.addLine(to: CGPoint(x: R * 0.1, y: -R * 0.07))
+                k.stroke(tick, with: .color(Color(hex: "#0B2A1E")),
+                         style: StrokeStyle(lineWidth: R * 0.06, lineCap: .round, lineJoin: .round))
+            }
+
+        case .doctor:
+            // System doctor: head mirror with a sweeping glint and a floating ECG whose pulse
+            // follows the Advanced Stats trend (green calm → amber faster → red fast + sweat drop).
+            let trend = AdvancedStatsStore.shared.trend
+            let speed: Double = trend == .critical ? 2.4 : trend == .rising ? 1.6 : 1
+            var band = Path()
+            for i in 0...24 {
+                let a = Double.pi * (1.12 + 0.76 * Double(i) / 24)
+                let p = CGPoint(x: rx * CGFloat(cos(a)), y: -ry * 0.1 + ry * 0.9 * CGFloat(sin(a)))
+                if i == 0 { band.move(to: p) } else { band.addLine(to: p) }
+            }
+            let head = Self.popped(ctx, at: CGPoint(x: 0, y: -ry), pop)
+            head.stroke(band, with: .color(Color(hex: "#E5E7EB")), style: StrokeStyle(lineWidth: R * 0.1, lineCap: .round))
+            var mirror = head
+            mirror.translateBy(x: -rx * 0.35, y: -ry * 0.82)
+            let mr = R * 0.27
+            let disc = Path(ellipseIn: CGRect(x: -mr, y: -mr, width: mr * 2, height: mr * 2))
+            mirror.fill(disc, with: .radialGradient(Gradient(colors: [.white, Color(hex: "#9CA3AF")]),
+                                                    center: CGPoint(x: -mr * 0.3, y: -mr * 0.3), startRadius: 0, endRadius: mr))
+            mirror.stroke(disc, with: .color(Color(hex: "#6B7280")), lineWidth: R * 0.05)
+            mirror.fill(Path(ellipseIn: CGRect(x: -mr * 0.22, y: -mr * 0.22, width: mr * 0.44, height: mr * 0.44)),
+                        with: .color(Color(hex: "#4B5563")))
+            var glint = mirror
+            glint.clip(to: disc)
+            glint.rotate(by: .radians(-0.6))
+            let gx = CGFloat((t * 0.7).truncatingRemainder(dividingBy: 1.6) - 0.3) * mr * 2.4 - mr
+            glint.fill(Path(CGRect(x: gx, y: -mr * 1.5, width: mr * 0.28, height: mr * 3)), with: .color(.white.opacity(0.85)))
+
+            var mon = Self.popped(ctx, at: CGPoint(x: rx * 0.6, y: -ry * 1.75), pop)
+            mon.translateBy(x: rx * 0.6, y: -ry * 1.75 + bob)
+            let bw = R * 1.35, bh = R * 0.78
+            let screen = Path(roundedRect: CGRect(x: -bw / 2, y: -bh / 2, width: bw, height: bh), cornerRadius: R * 0.12)
+            mon.fill(screen, with: .color(Color(hex: "#1E2230")))
+            mon.stroke(screen, with: .color(.white.opacity(0.3)), lineWidth: R * 0.035)
+            var trace = mon
+            trace.clip(to: Path(roundedRect: CGRect(x: -bw / 2 + R * 0.06, y: -bh / 2 + R * 0.06,
+                                                    width: bw - R * 0.12, height: bh - R * 0.12), cornerRadius: R * 0.08))
+            let w = bw - R * 0.12, scroll = t * speed * 1.1
+            var ecg = Path()
+            for i in 0...60 {
+                let u = Double(i) / 60
+                let p = CGPoint(x: -w / 2 + CGFloat(u) * w,
+                                y: CGFloat(Self.ecg((u * 2 + scroll).truncatingRemainder(dividingBy: 1))) * R)
+                if i == 0 { ecg.move(to: p) } else { ecg.addLine(to: p) }
+            }
+            trace.stroke(ecg, with: .color(trend.color), style: StrokeStyle(lineWidth: R * 0.06, lineCap: .round, lineJoin: .round))
+
+            let thump = CGFloat(pow(max(0, sin(t * speed * .pi * 1.1)), 8))
+            var h = Self.popped(ctx, at: CGPoint(x: -rx * 0.95, y: -ry * 1.35), pop)
+            h.translateBy(x: -rx * 0.95, y: -ry * 1.35)
+            h.scaleBy(x: 1 + thump * 0.25, y: 1 + thump * 0.25)
+            Self.heart(h, center: .zero, size: R * 0.34, color: trend.color)
+
+            if trend == .critical {
+                let p = (t * 1.2).truncatingRemainder(dividingBy: 1)
+                var d = ctx
+                d.opacity = ctx.opacity * (1 - p)
+                d.translateBy(x: rx * 0.7, y: -ry * 0.55 + CGFloat(p) * R * 0.4)
+                var drop = Path()
+                drop.move(to: CGPoint(x: 0, y: -R * 0.14))
+                drop.addQuadCurve(to: CGPoint(x: 0, y: R * 0.07), control: CGPoint(x: R * 0.1, y: 0))
+                drop.addQuadCurve(to: CGPoint(x: 0, y: -R * 0.14), control: CGPoint(x: -R * 0.1, y: 0))
+                d.fill(drop, with: .color(Color(hex: "#7DD3FC")))
+            }
+        }
+    }
+
+    /// One heartbeat on a 0…1 phase, in R units (negative is up): P-less QRS spike, then a T wave.
+    private static func ecg(_ ph: Double) -> Double {
+        switch ph {
+        case 0.40..<0.45: return -(ph - 0.40) / 0.05 * 0.32
+        case 0.45..<0.50: return -0.32 + (ph - 0.45) / 0.05 * 0.5
+        case 0.50..<0.54: return 0.18 - (ph - 0.50) / 0.04 * 0.18
+        case 0.66..<0.78: return -sin((ph - 0.66) / 0.12 * .pi) * 0.07
+        default:          return 0
         }
     }
 
