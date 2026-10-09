@@ -83,15 +83,17 @@ struct BotCanvasView: View {
                     #endif
                     engine.setDancing(dancing || spotifyMochi || mediaDance)
                     // Anything playing in the music tab (Spotify or other media): headphones thump, hands pump.
+                    // Home with the Spotify pill playing: same headphones groove as the music tab.
+                    let homeSpotify = spotifyMochi && state.mode == .expanded && state.view == .overview
                     #if !APPSTORE
-                    let mediaPlaying = state.mode == .expanded && state.view == .spotify
-                        && (state.spotifyPlaying || NowPlaying.shared.isPlaying)
+                    let mediaPlaying = homeSpotify || (state.mode == .expanded && state.view == .spotify
+                        && (state.spotifyPlaying || NowPlaying.shared.isPlaying))
                     #else
                     let mediaPlaying = false
                     #endif
                     // Tab props (headphones, trader visor…) on the island's own Mochi only.
                     let prop: MochiProp = lookOriginOverride == nil && state.mode == .expanded
-                        ? MochiProp.forView(state.view) : .none
+                        ? (homeSpotify ? .headphones : MochiProp.forView(state.view)) : .none
                     let isWardrobe = state.mode == .expanded && state.view == .wardrobe
                     let isFocusMain = state.focusId == state.mainPillId || state.focusId == nil
                     let showOutfit = isFocusMain || state.mode != .expanded || isWardrobe

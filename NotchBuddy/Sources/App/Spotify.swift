@@ -687,7 +687,7 @@ struct CompactSpotifyOverlay: View {
             ZStack(alignment: .topLeading) {
                 notes(t)
                 HStack(spacing: 6) {
-                    equalizer(t)
+                    Self.equalizer(t)
                     Text(spotify.compactLine(at: ctx.date))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(.white.opacity(0.92))
@@ -708,7 +708,7 @@ struct CompactSpotifyOverlay: View {
     }
 
     /// Three green bars bouncing out of phase.
-    private func equalizer(_ t: Double) -> some View {
+    static func equalizer(_ t: Double) -> some View {
         HStack(alignment: .bottom, spacing: 1.5) {
             ForEach(0..<3, id: \.self) { i in
                 Capsule()
@@ -732,6 +732,33 @@ struct CompactSpotifyOverlay: View {
                             y: islandH * 0.75 - CGFloat(phase) * islandH * 0.7)
             }
         }
+    }
+}
+// MARK: - Home Spotify card: the compact notch's lyric line
+
+struct SpotifyLyricLine: View {
+    @ObservedObject var spotify = SpotifyController.shared
+    @Environment(\.islandViewActive) private var viewActive
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !spotify.isPlaying || !viewActive)) { ctx in
+            let line = spotify.compactLine(at: ctx.date)
+            HStack(spacing: 6) {
+                CompactSpotifyOverlay.equalizer(ctx.date.timeIntervalSinceReferenceDate)
+                Text(line)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.92))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .id(line)
+                    .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
+                                            removal: .opacity))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .clipped()
+            .animation(.easeOut(duration: 0.3), value: line)
+        }
+        .allowsHitTesting(false)
     }
 }
 #endif

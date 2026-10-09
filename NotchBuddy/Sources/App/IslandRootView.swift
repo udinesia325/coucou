@@ -535,28 +535,47 @@ struct IslandContentView: View {
 struct IslandHeader: View {
     @ObservedObject var state: AppState
 
+    /// Header tabs, left to right. Also the order trackpad swipes walk through.
+    static let tabs: [(icon: String, view: IslandView)] = {
+        var t: [(icon: String, view: IslandView)] = [
+            ("house.fill", .overview), ("bubble.left.fill", .prompt), ("plus", .upload),
+            ("gauge", .stats), ("tray.full", .shelf), ("doc.on.clipboard", .clipboard),
+        ]
+        #if !APPSTORE
+        t += [("music.note", .spotify), ("sun.max", .today)]
+        #endif
+        t += [("chart.line.uptrend.xyaxis", .markets), ("checklist", .notes)]
+        return t
+    }()
+
+    /// Switches to a header tab (click or swipe).
+    @MainActor static func select(_ view: IslandView, state: AppState) {
+        #if !APPSTORE
+        if view == .prompt && state.promptContext == nil {
+            state.promptContext = WindowContextCapture.captureActive(from: state.lastExternalApp)
+        }
+        #endif
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            state.view = view
+        }
+    }
+
+    /// Swipe step: the tab `offset` places away from the current one, nil at either end
+    /// or when the current view isn't a header tab.
+    static func neighbor(of view: IslandView, offset: Int) -> IslandView? {
+        let current = view == .empty ? .overview : view
+        guard let i = tabs.firstIndex(where: { $0.view == current }),
+              tabs.indices.contains(i + offset) else { return nil }
+        return tabs[i + offset].view
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             // Left: tab capsules
             HStack(spacing: 5) {
-                TabButton(icon: "house.fill", view: .overview, state: state)
-                TabButton(icon: "bubble.left.fill", view: .prompt, state: state, preAction: {
-                    #if !APPSTORE
-                    if state.promptContext == nil {
-                        state.promptContext = WindowContextCapture.captureActive(from: state.lastExternalApp)
-                    }
-                    #endif
-                })
-                TabButton(icon: "plus", view: .upload, state: state)
-                TabButton(icon: "gauge", view: .stats, state: state)
-                TabButton(icon: "tray.full", view: .shelf, state: state)
-                TabButton(icon: "doc.on.clipboard", view: .clipboard, state: state)
-                #if !APPSTORE
-                TabButton(icon: "music.note", view: .spotify, state: state)
-                TabButton(icon: "sun.max", view: .today, state: state)
-                #endif
-                TabButton(icon: "chart.line.uptrend.xyaxis", view: .markets, state: state)
-                TabButton(icon: "checklist", view: .notes, state: state)
+                ForEach(Self.tabs.indices, id: \.self) { i in
+                    TabButton(icon: Self.tabs[i].icon, view: Self.tabs[i].view, state: state)
+                }
             }
             .padding(.leading, 14)
 
@@ -599,7 +618,6 @@ struct TabButton: View {
     let icon: String
     let view: IslandView
     @ObservedObject var state: AppState
-    var preAction: (() -> Void)? = nil
     @State private var isHovered = false
 
     private var isOn: Bool {
@@ -608,12 +626,7 @@ struct TabButton: View {
     }
 
     var body: some View {
-        Button(action: {
-            preAction?()
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                state.view = view
-            }
-        }) {
+        Button(action: { IslandHeader.select(view, state: state) }) {
             Image(systemName: icon)
                 .font(.system(size: 13))
                 .foregroundColor(isOn ? Color(hex: "#F5F6F8") : (isHovered ? Color(hex: "#B0B5BE") : Color(hex: "#8E939C")))

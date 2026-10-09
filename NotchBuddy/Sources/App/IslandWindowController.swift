@@ -62,6 +62,15 @@ final class IslandWindowController: NSWindowController {
     // Island-local key monitor (active only when island is key window)
     private var localKeyMonitor: Any?
 
+    // Trackpad swipe between header tabs, accumulated over one gesture
+    private var swipeDX: CGFloat = 0
+    private var swipeDY: CGFloat = 0
+    private var swipeFired = false
+
+    // Tab shown when the island last closed: reopened on it within `rememberTabSeconds`
+    private var lastClosedView: IslandView?
+    private var lastClosedAt = Date.distantPast
+
     convenience init() {
         let screen = Self.notchScreen() ?? NSScreen.main!
         let geometry = Self.screenGeometry(for: screen)
@@ -218,7 +227,7 @@ final class IslandWindowController: NSWindowController {
                 if !self.wasInIsland { self.fsm.mouseLeft() }
 
             case .home:
-                self.expand(to: self.defaultView())
+                self.expand(to: self.openingView())
                 // Start collapse timer if mouse not currently hovering
                 if !self.wasInIsland {
                     self.fsm.mouseLeft()
@@ -495,6 +504,8 @@ final class IslandWindowController: NSWindowController {
             logPanelState("expand")
         }
         if prev == .expanded {
+            lastClosedView = state.view
+            lastClosedAt = .now
             SoundEngine.shared.play("close")
             if fsm.isHeldOpen?() != true { state.isPinned = false }
         }
@@ -548,7 +559,7 @@ final class IslandWindowController: NSWindowController {
                 collapse()
             } else {
                 islandPanel.makeKey()
-                expand(to: defaultView())
+                expand(to: openingView())
             }
 
         case .openChat:
@@ -610,6 +621,45 @@ final class IslandWindowController: NSWindowController {
             guard let self, self.islandPanel.isKeyWindow else { return event }
             return self.handleIslandKey(event) ? nil : event
         }
+        NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self else { return event }
+            return MainActor.assumeIsolated { self.handleSwipe(event) } ? nil : event
+        }
+    }
+
+    /// Two-finger horizontal swipe on the open island → neighbouring header tab, once per gesture.
+    /// Fingers to the left → tab on the right (like pages and Spaces). Returns true when consumed.
+    private func handleSwipe(_ event: NSEvent) -> Bool {
+        guard event.window === islandPanel, state.mode == .expanded,
+              event.hasPreciseScrollingDeltas, event.momentumPhase == [] else { return false }
+        if event.phase == .began || event.phase == .mayBegin {
+            swipeDX = 0; swipeDY = 0; swipeFired = false
+        }
+        guard event.phase == .began || event.phase == .changed else { return false }
+        if swipeFired { return true }   // rest of a gesture that already switched tab
+        swipeDX += event.scrollingDeltaX
+        swipeDY += event.scrollingDeltaY
+        guard abs(swipeDX) > 40, abs(swipeDX) > abs(swipeDY) * 2 else { return false }
+        // Rows that scroll sideways (shelf, clipboard) keep the gesture.
+        guard !inHorizontalScroll(event.locationInWindow) else { return false }
+        swipeFired = true
+        let fingersDX = event.isDirectionInvertedFromDevice ? swipeDX : -swipeDX
+        guard let target = IslandHeader.neighbor(of: state.view, offset: fingersDX < 0 ? 1 : -1) else { return false }
+        IslandHeader.select(target, state: state)
+        resetActivity()
+        return true
+    }
+
+    /// Is the point (window coords) over a scroll view whose content is wider than it?
+    private func inHorizontalScroll(_ p: NSPoint) -> Bool {
+        guard let content = islandPanel.contentView else { return false }
+        var v = content.hitTest(content.superview?.convert(p, from: nil) ?? p)
+        while let view = v {
+            if let sv = view as? NSScrollView, let doc = sv.documentView,
+               doc.frame.width > sv.contentView.bounds.width + 1 { return true }
+            v = view.superview
+        }
+        return false
     }
 
     @discardableResult
@@ -896,7 +946,7 @@ final class IslandWindowController: NSWindowController {
                     if hadPendingClick && self.state.mode != .expanded {
                         if self.fsm.state == .home {
                             // FSM already thinks it's open (e.g. the view folded it): just reopen.
-                            self.expand(to: self.defaultView())
+                            self.expand(to: self.openingView())
                         } else {
                             self.fsm.click()   // FSM petit/hidden→home; onTransition calls expand(to:)
                         }
@@ -1136,6 +1186,18 @@ final class IslandWindowController: NSWindowController {
     func defaultView() -> IslandView {
         if state.pendingApproval != nil { return .approval }
         return state.tasks.isEmpty ? .empty : .overview
+    }
+
+    /// The view the island opens on: the last tab if it closed less than `rememberTabSeconds`
+    /// ago (Settings → General, default 10 s, 0 = always Home), otherwise `defaultView()`.
+    func openingView() -> IslandView {
+        let keep = UserDefaults.standard.object(forKey: "rememberTabSeconds") as? Double ?? 10
+        if state.pendingApproval == nil, let v = lastClosedView, v != .overview,
+           v == .settings || IslandHeader.tabs.contains(where: { $0.view == v }),
+           Date().timeIntervalSince(lastClosedAt) < keep {
+            return v
+        }
+        return defaultView()
     }
 
     func baseMode() -> IslandMode {

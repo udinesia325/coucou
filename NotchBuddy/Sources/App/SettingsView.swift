@@ -100,6 +100,8 @@ struct SettingsView: View {
 
     // Sidebar selection persisted across sessions
     @AppStorage("settingsSection") private var selectedSection: String = "general"
+    // Read by IslandWindowController.openingView(); 0 = always reopen on Home
+    @AppStorage("rememberTabSeconds") private var rememberTabSeconds: Double = 10
     #if PHONE_LINK
     @AppStorage("iPhoneSyncEnabled") private var iPhoneSyncEnabled = false
     @AppStorage("iPhoneLiveActivityEnabled") private var iPhoneLiveActivityEnabled = false
@@ -262,6 +264,13 @@ struct SettingsView: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 48)
                     Text("min without movement")
+                }
+                HStack(spacing: 8) {
+                    Text("Reopen last tab within")
+                    TextField("10", value: $rememberTabSeconds, format: .number)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 48)
+                    Text("s of closing (0 = always Home)")
                 }
                 Toggle("Hide with the menu bar (fullscreen apps)", isOn: $state.hideWithMenuBar)
                 Text(state.hideWithMenuBar

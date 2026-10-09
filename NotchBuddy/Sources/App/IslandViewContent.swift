@@ -2015,12 +2015,15 @@ struct IntegrationCardView: View {
                             PillIconButton(icon: "backward.fill") { spotify.previous() }
                             PillIconButton(icon: spotify.isPlaying ? "pause.fill" : "play.fill") { spotify.playPause() }
                             PillIconButton(icon: "forward.fill") { spotify.next() }
+                            if spotify.isPlaying { SpotifyLyricLine() }
                             Button("Lyrics & player") {
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { appState.view = .spotify }
                             }
                             .font(.system(size: 11, weight: .medium))
                             .foregroundColor(Color(hex: task.color).opacity(0.85))
                             .buttonStyle(.plain)
+                            .fixedSize()
+                            .padding(.trailing, spotify.isPlaying ? 16 : 0)  // lyric line fills up to here
                         } else if spotify.automationDenied {
                             Button("Open Settings…") { spotify.openAutomationSettings() }
                                 .font(.system(size: 11)).foregroundColor(Color(hex: "#8E939C")).buttonStyle(.plain)
