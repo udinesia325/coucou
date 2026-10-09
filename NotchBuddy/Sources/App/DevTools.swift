@@ -351,7 +351,7 @@ final class DevToolsStore: ObservableObject {
         p.standardError = FileHandle.nullDevice
         do { try p.run() } catch { return "" }
         if let timeout {
-            let box = UncheckedBox(p)
+            let box = UncheckedBox(value: p)
             DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { if box.value.isRunning { box.value.terminate() } }
         }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
