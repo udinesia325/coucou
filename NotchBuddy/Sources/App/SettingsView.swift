@@ -102,6 +102,8 @@ struct SettingsView: View {
     @AppStorage("settingsSection") private var selectedSection: String = "general"
     // Read by IslandWindowController.openingView(); 0 = always reopen on Home
     @AppStorage("rememberTabSeconds") private var rememberTabSeconds: Double = 10
+    // Read by IslandStateMachine.petitToHiddenDelay
+    @AppStorage("compactHideSeconds") private var compactHideSeconds: Double = 15
     #if PHONE_LINK
     @AppStorage("iPhoneSyncEnabled") private var iPhoneSyncEnabled = false
     @AppStorage("iPhoneLiveActivityEnabled") private var iPhoneLiveActivityEnabled = false
@@ -271,6 +273,14 @@ struct SettingsView: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 48)
                     Text("s of closing (0 = always Home)")
+                }
+                HStack(spacing: 8) {
+                    Text("Hide compact stats after")
+                    Slider(value: $compactHideSeconds, in: 3...15, step: 1)
+                        .frame(width: 140)
+                    Text("\(Int(compactHideSeconds)) s")
+                        .monospacedDigit()
+                        .frame(width: 32, alignment: .leading)
                 }
                 Toggle("Hide with the menu bar (fullscreen apps)", isOn: $state.hideWithMenuBar)
                 Text(state.hideWithMenuBar

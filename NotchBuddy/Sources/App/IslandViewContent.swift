@@ -2017,7 +2017,6 @@ struct IntegrationCardView: View {
                             PillIconButton(icon: "backward.fill") { spotify.previous() }
                             PillIconButton(icon: spotify.isPlaying ? "pause.fill" : "play.fill") { spotify.playPause() }
                             PillIconButton(icon: "forward.fill") { spotify.next() }
-                            if spotify.isPlaying { SpotifyLyricLine() }
                             Button("Lyrics & player") {
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { appState.view = .spotify }
                             }
@@ -2025,7 +2024,6 @@ struct IntegrationCardView: View {
                             .foregroundColor(Color(hex: task.color).opacity(0.85))
                             .buttonStyle(.plain)
                             .fixedSize()
-                            .padding(.trailing, spotify.isPlaying ? 16 : 0)  // lyric line fills up to here
                         } else if spotify.automationDenied {
                             Button("Open Settings…") { spotify.openAutomationSettings() }
                                 .font(.system(size: 11)).foregroundColor(Color(hex: "#8E939C")).buttonStyle(.plain)
@@ -2121,6 +2119,15 @@ struct IntegrationCardView: View {
                 }
                 .padding(.leading, 108)
                 .padding(.top, 2)
+
+                #if !APPSTORE
+                // Own row: squeezed next to the controls it had no room left.
+                if task.id == "integration_spotify" && spotify.hasTrack && spotify.isPlaying {
+                    SpotifyLyricLine()
+                        .padding(.leading, 108)
+                        .padding(.trailing, 16)
+                }
+                #endif
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .padding(.top, 4)

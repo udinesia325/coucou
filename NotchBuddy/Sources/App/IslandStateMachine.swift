@@ -25,8 +25,12 @@ final class IslandStateMachine {
 
     /// home → petit delay (seconds). Override for debug.
     var homeToPetitDelay: TimeInterval = 15
-    /// petit → hidden delay (seconds). Override for debug.
-    var petitToHiddenDelay: TimeInterval = 60
+    /// petit → hidden delay (seconds), Settings › "Hide compact stats after" (3–15 s).
+    /// Spotify / Focus never time out (`keepsCompact`).
+    var petitToHiddenDelay: TimeInterval {
+        let s = UserDefaults.standard.double(forKey: "compactHideSeconds")
+        return s == 0 ? 15 : min(max(s, 3), 15)
+    }
     /// coucou → petit delay after greeting animation ends (no hover). ~0.6s syncs with canvas collapse.
     var greetAutoCollapseDelay: TimeInterval = 0.6
     /// coucou → petit delay when mouse is hovering over the greeting.
