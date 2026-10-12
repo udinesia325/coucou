@@ -390,6 +390,27 @@ final class IslandWindowController: NSWindowController {
         if shown { menuBarDetectionWorks = true }
         // Fail open: if this Mac never showed us a menu bar window, never hide the island.
         fullscreenSpace = menuBarDetectionWorks && !shown
+        lastMenuBarRect = windows.first { w in
+            (w[kCGWindowLayer as String] as? Int) == level
+                && (w[kCGWindowOwnerName as String] as? String)?.replacingOccurrences(of: " ", with: "") == "WindowServer"
+        }.flatMap { ($0[kCGWindowBounds as String] as? NSDictionary).flatMap { CGRect(dictionaryRepresentation: $0) } }
+        lastScreenTop = top
+        logFullscreenDiag("refresh")
+    }
+
+    // ponytail: diagnostic for "island gone after a Chrome fullscreen window" — remove once fixed.
+    // Logs only when the state changes: `log show --predicate 'subsystem == "fr.louisraille.NotchBuddy"' --last 1h`
+    private var lastMenuBarRect: CGRect?
+    private var lastScreenTop: CGFloat = 0
+    private var lastFullscreenDiag = ""
+    private func logFullscreenDiag(_ tag: String) {
+        guard let p = window else { return }
+        let info = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(p.windowNumber)) as? [[String: Any]]
+        let wsOnscreen = (info?.first?[kCGWindowIsOnscreen as String] as? Bool) ?? false
+        let msg = "fsSpace=\(fullscreenSpace) hiddenFS=\(hiddenForFullscreen) fsHidden=\(state.fullscreenHidden) visible=\(p.isVisible) wsOnscreen=\(wsOnscreen) occlusionVisible=\(p.occlusionState.contains(.visible)) onActiveSpace=\(p.isOnActiveSpace) mode=\(state.mode) menuBar=\(lastMenuBarRect.map { "\($0)" } ?? "none") screenTop=\(lastScreenTop) detectionWorks=\(menuBarDetectionWorks) screen=\(lastScreen?.frame ?? .zero) frame=\(p.frame)"
+        guard msg != lastFullscreenDiag else { return }
+        lastFullscreenDiag = msg
+        Logger(subsystem: "fr.louisraille.NotchBuddy", category: "diag").notice("\(tag, privacy: .public) \(msg, privacy: .public)")
     }
 
     /// Returns true while the island is hidden with the menu bar. Touching the top edge shows
@@ -425,6 +446,7 @@ final class IslandWindowController: NSWindowController {
                     try? await Task.sleep(nanoseconds: 600_000_000)
                     guard !Task.isCancelled, self?.hiddenForFullscreen == true else { return }
                     panel?.orderOut(nil)
+                    self?.logFullscreenDiag("orderOut")
                 }
             } else if panel.isVisible {
                 state.fullscreenHidden = false   // mid-hide: the spring turns around from where it is
@@ -435,14 +457,17 @@ final class IslandWindowController: NSWindowController {
                     try? await Task.sleep(nanoseconds: 20_000_000)
                     guard !Task.isCancelled, self?.hiddenForFullscreen == false else { return }
                     self?.state.fullscreenHidden = false
+                    self?.logFullscreenDiag("shown+20ms")
                 }
             }
+            logFullscreenDiag(hide ? "hide" : "show")
         }
         // Self-heal: the island should be up but its window isn't on screen (hidden by AppKit
         // or anything else) — bring it back.
         if !hiddenForFullscreen && !panel.isVisible {
             panel.orderFrontRegardless()
             state.fullscreenHidden = false
+            logFullscreenDiag("selfHeal")
         }
         if !hide, let screen = panel.screen { lastScreen = screen }
         return hide
