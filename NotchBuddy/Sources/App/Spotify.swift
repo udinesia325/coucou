@@ -761,4 +761,21 @@ struct SpotifyLyricLine: View {
         .allowsHitTesting(false)
     }
 }
+// MARK: - Upstream API (voice control, Settings, desktop Mochi)
+
+/// The names upstream Coucou's own Spotify controller had, so its voice commands and
+/// pill code drive this one.
+extension SpotifyController {
+    nonisolated static let pillId = "integration_spotify"
+
+    var isInstalled: Bool { NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.bundleId) != nil }
+
+    func play()  { if !isPlaying { playPause() } }
+    func pause() { if isPlaying { playPause() } }
+    func nextTrack()     { next() }
+    func previousTrack() { previous() }
+    func setVolume(_ pct: Int) { setVolume(Double(min(100, max(0, pct)))) }
+    func adjustVolume(by delta: Int) { setVolume(Int(volume) + delta) }
+}
+
 #endif
