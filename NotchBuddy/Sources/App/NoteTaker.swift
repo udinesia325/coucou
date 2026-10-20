@@ -119,7 +119,7 @@ final class NoteTaker: ObservableObject {
             startError = String(localized: "notes.error.models")
             return
         }
-        guard await AVAudioApplication.requestRecordPermission() else {
+        guard await requestMicPermission() else {
             startError = String(localized: "notes.error.mic")
             return
         }
@@ -332,6 +332,7 @@ final class NoteTaker: ObservableObject {
     }
 
     nonisolated private static func diarize(_ url: URL) async throws -> [SpeakerTurn] {
+        guard #available(macOS 14, *) else { return [] }   // fork: macOS 13 build, no speaker labels
         let diarizer = OfflineDiarizerManager()
         try await diarizer.prepareModels(directory: Parakeet.modelsRoot)
         let result = try await diarizer.process(url)

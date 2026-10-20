@@ -147,13 +147,19 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
     private static var observingVoices = false
 
     private static func observeVoiceChanges() {
-        guard !observingVoices else { return }
+        guard !observingVoices, #available(macOS 14, *) else { return }
         observingVoices = true
         NotificationCenter.default.addObserver(
             forName: AVSpeechSynthesizer.availableVoicesDidChangeNotification, object: nil, queue: .main
         ) { _ in
             MainActor.assumeIsolated { VoiceSpeaker.voiceCache.removeAll() }
         }
+    }
+
+    /// fork: voiceTraits is macOS 14+; before, no voice is flagged.
+    private static func isNoveltyOrPersonal(_ v: AVSpeechSynthesisVoice) -> Bool {
+        guard #available(macOS 14, *) else { return false }
+        return v.voiceTraits.contains(.isNoveltyVoice) || v.voiceTraits.contains(.isPersonalVoice)
     }
 
     private static func findBestVoice(for loc: Locale, gender: String) -> AVSpeechSynthesisVoice? {
@@ -163,8 +169,7 @@ final class VoiceSpeaker: NSObject, AVSpeechSynthesizerDelegate, AVAudioPlayerDe
 
         let voices = AVSpeechSynthesisVoice.speechVoices().filter { v in
             (v.language == lang || v.language.hasPrefix(lang + "-"))
-                && !v.voiceTraits.contains(.isNoveltyVoice)
-                && !v.voiceTraits.contains(.isPersonalVoice)
+                && !Self.isNoveltyOrPersonal(v)
         }
         guard !voices.isEmpty else { return AVSpeechSynthesisVoice(language: exact ?? lang) }
         let wanted: AVSpeechSynthesisVoiceGender = gender == "male" ? .male : .female

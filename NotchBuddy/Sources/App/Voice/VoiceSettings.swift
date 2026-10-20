@@ -123,7 +123,7 @@ enum VoiceSettings {
     /// Request microphone then speech recognition. Returns true if both granted.
     @MainActor
     static func requestPermissions() async -> Bool {
-        let mic = await AVAudioApplication.requestRecordPermission()
+        let mic = await requestMicPermission()
         guard mic else { return false }
         return await withCheckedContinuation { cont in
             SFSpeechRecognizer.requestAuthorization { status in

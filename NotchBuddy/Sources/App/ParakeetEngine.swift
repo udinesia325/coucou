@@ -103,6 +103,7 @@ final class Parakeet: ObservableObject {
 
     /// Downloads (once) and loads the Notetaker's speaker diarizer.
     nonisolated static func prepareDiarizer() async throws {
+        guard #available(macOS 14, *) else { return }   // fork: macOS 13 build, no speaker labels
         let diarizer = OfflineDiarizerManager()
         try await diarizer.prepareModels(directory: modelsRoot)
     }
@@ -206,7 +207,7 @@ final class ParakeetDictation: @unchecked Sendable {
     private let samples = OSAllocatedUnfairLock(initialState: [Float]())
 
     @MainActor func start() async {
-        guard !isRecording, await AVAudioApplication.requestRecordPermission() else { return }
+        guard !isRecording, await requestMicPermission() else { return }
         samples.withLock { $0.removeAll(keepingCapacity: true) }
         guard Self.startEngine(engine, into: samples, bands: bands) else { return }
         isRecording = true

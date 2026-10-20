@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 // Back-deploy shims for the legacy build (scripts/build-legacy.sh, macOS 12+).
@@ -64,4 +65,10 @@ struct ChipFlow<Content: View>: View {
                       alignment: .leading, spacing: spacing) { content }
         }
     }
+}
+
+/// Microphone permission: `AVAudioApplication` on macOS 14+, AVCaptureDevice before.
+func requestMicPermission() async -> Bool {
+    if #available(macOS 14, *) { return await AVAudioApplication.requestRecordPermission() }
+    return await AVCaptureDevice.requestAccess(for: .audio)
 }

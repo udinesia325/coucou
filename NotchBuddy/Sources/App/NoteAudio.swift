@@ -170,6 +170,8 @@ final class SystemAudioTap: @unchecked Sendable {
     private let queue = DispatchQueue(label: "fr.louisraille.NotchBuddy.notetaker.system", qos: .userInitiated)
 
     func start(sink: @escaping @Sendable ([Float]) -> Void) throws {
+        // fork: the system-audio tap is macOS 14.2+; the macOS 13 build notes the mic only.
+        guard #available(macOS 14.2, *) else { throw TapError.failed("process tap (macOS 14.2+)", -1) }
         let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
         description.uuid = UUID()
         description.name = "Coucou Notetaker"
@@ -249,7 +251,7 @@ final class SystemAudioTap: @unchecked Sendable {
             }
             AudioHardwareDestroyAggregateDevice(aggregateID)
         }
-        if tapID != AudioObjectID(kAudioObjectUnknown) { AudioHardwareDestroyProcessTap(tapID) }
+        if #available(macOS 14.2, *), tapID != AudioObjectID(kAudioObjectUnknown) { AudioHardwareDestroyProcessTap(tapID) }
         procID = nil
         if let tapList { free(tapList.unsafeMutablePointer) }
         tapList = nil

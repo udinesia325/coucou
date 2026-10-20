@@ -1356,7 +1356,7 @@ struct MailView: View {
 #if !APPSTORE
 /// The mic's right-click menu: Automatic (the user's languages) or one fixed language.
 private struct DictationLanguageMenu: View {
-    @Bindable var dictation: MacDictation
+    @ObservedObject var dictation: MacDictation
 
     var body: some View {
         let automatic = MacDictation.automaticLocales().map(\.identifier)
@@ -1394,7 +1394,7 @@ struct PromptView: View {
     @State private var showModelPicker = false
 
     #if !APPSTORE
-    @State private var dictation = MacDictation()
+    @StateObject private var dictation = MacDictation()
     #endif
     var body: some View {
         ZStack(alignment: .leading) {
