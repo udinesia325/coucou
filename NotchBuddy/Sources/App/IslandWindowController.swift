@@ -24,6 +24,7 @@ final class IslandWindowController: NSWindowController {
     private var hiddenForFullscreen = false
     private var fullscreenOrderTask: Task<Void, Never>?
     private var fullscreenRecheckTick = 0
+    private var lastSpaceHeal = Date.distantPast
     private var menuBarDetectionWorks = false
     private var topEdgeTouched = Date.distantPast
     private var lastScreen: NSScreen?
@@ -468,6 +469,19 @@ final class IslandWindowController: NSWindowController {
             panel.orderFrontRegardless()
             state.fullscreenHidden = false
             logFullscreenDiag("selfHeal")
+        }
+        // Ordered out on a fullscreen Space, then the user switched Space (a new Chrome
+        // incognito window…): WindowServer keeps the panel pinned to that old Space, so it
+        // stays "visible" yet shows nowhere. Re-register it for all Spaces.
+        if !hiddenForFullscreen && panel.isVisible && !panel.isOnActiveSpace,
+           Date().timeIntervalSince(lastSpaceHeal) > 1 {
+            lastSpaceHeal = Date()
+            panel.orderOut(nil)
+            let behavior = panel.collectionBehavior
+            panel.collectionBehavior = []
+            panel.collectionBehavior = behavior
+            panel.orderFrontRegardless()
+            logFullscreenDiag("spaceHeal")
         }
         if !hide, let screen = panel.screen { lastScreen = screen }
         return hide
