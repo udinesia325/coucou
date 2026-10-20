@@ -149,11 +149,15 @@ final class SpotifyController: ObservableObject {
     }
 
     /// Current line for the compact notch: lyric, a note during breaks, or the track name.
-    func compactLine(at date: Date) -> String {
-        if case .synced(let lines) = lyrics, let i = LRC.index(in: lines, at: position(at: date) + 0.25) {
-            return lines[i].text.isEmpty ? "♪ ♪ ♪" : lines[i].text
+    func compactLine(at date: Date) -> String { compactKaraoke(at: date).text }
+
+    /// The compact line and how many of its characters are already sung (karaoke fill).
+    func compactKaraoke(at date: Date) -> (text: String, sung: Int) {
+        let p = position(at: date) + 0.25
+        if case .synced(let lines) = lyrics, let i = LRC.index(in: lines, at: p) {
+            return lines[i].text.isEmpty ? ("♪ ♪ ♪", 0) : (lines[i].text, Int(LRC.sung(in: lines, index: i, at: p)))
         }
-        return [title, artist].compactMap { $0 }.joined(separator: " — ")
+        return ([title, artist].compactMap { $0 }.joined(separator: " — "), 0)
     }
 
     // MARK: AppleScript
@@ -628,11 +632,14 @@ struct SpotifyView: View {
             }
             switch spotify.lyrics {
             case .synced(let lines):
-                TimelineView(.periodic(from: .now, by: active && spotify.isPlaying ? 0.25 : 3600)) { ctx in
-                    let i = LRC.index(in: lines, at: spotify.position(at: ctx.date) + 0.25)
+                // 20 fps while playing: the current line fills character by character.
+                TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !(active && spotify.isPlaying))) { ctx in
+                    let p = spotify.position(at: ctx.date) + 0.25
+                    let i = LRC.index(in: lines, at: p)
                     VStack(alignment: .leading, spacing: 5) {
                         lyric(i.flatMap { $0 > 0 ? lines[$0 - 1].text : nil }, current: false)
-                        lyric(i.map { lines[$0].text.isEmpty ? "♪" : lines[$0].text } ?? "♪", current: true)
+                        lyric(i.map { lines[$0].text.isEmpty ? "♪" : lines[$0].text } ?? "♪", current: true,
+                              sung: i.map { Int(LRC.sung(in: lines, index: $0, at: p)) } ?? 0)
                         lyric(lines.indices.contains((i ?? -1) + 1) ? lines[(i ?? -1) + 1].text : nil, current: false)
                     }
                     .animation(.easeInOut(duration: 0.25), value: i)
@@ -654,10 +661,10 @@ struct SpotifyView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private func lyric(_ text: String?, current: Bool) -> some View {
-        Text(text ?? " ")
+    private func lyric(_ text: String?, current: Bool, sung: Int = 0) -> some View {
+        (current ? CompactSpotifyOverlay.karaoke(text ?? " ", sung: sung, rest: Color(hex: "#C5C8CD"))
+                 : Text(text ?? " ").foregroundColor(Color(hex: "#6B7079")))
             .font(.system(size: current ? 13.5 : 11, weight: current ? .bold : .regular))
-            .foregroundColor(current ? SpotifyController.green : Color(hex: "#6B7079"))
             .lineLimit(2)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -684,27 +691,33 @@ struct CompactSpotifyOverlay: View {
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !spotify.isPlaying)) { ctx in
             let t = ctx.date.timeIntervalSinceReferenceDate
+            let k = spotify.compactKaraoke(at: ctx.date)
             ZStack(alignment: .topLeading) {
                 notes(t)
                 HStack(spacing: 6) {
                     Self.equalizer(t)
-                    Text(spotify.compactLine(at: ctx.date))
+                    Self.karaoke(k.text, sung: k.sung, rest: .white.opacity(0.92))
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.92))
                         .lineLimit(1)
                         .truncationMode(.tail)
-                        .id(spotify.compactLine(at: ctx.date))
+                        .id(k.text)
                         .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
                                                 removal: .opacity))
                 }
                 .frame(width: inline ? islandW - 128 : islandW - 84,
                        height: inline ? islandH : compactLyricRowHeight, alignment: .center)
                 .offset(x: 64, y: inline ? 0 : islandH - compactLyricRowHeight)
-                .animation(.easeOut(duration: 0.3), value: spotify.compactLine(at: ctx.date))
+                .animation(.easeOut(duration: 0.3), value: k.text)
             }
             .frame(width: islandW, height: islandH, alignment: .topLeading)
         }
         .allowsHitTesting(false)
+    }
+
+    /// A lyric line whose first `sung` characters are Spotify green: karaoke, character by character.
+    static func karaoke(_ text: String, sung: Int, rest: Color) -> Text {
+        Text(text.prefix(sung)).foregroundColor(SpotifyController.green)
+            + Text(text.dropFirst(sung)).foregroundColor(rest)
     }
 
     /// Three green bars bouncing out of phase.
@@ -742,12 +755,12 @@ struct SpotifyLyricLine: View {
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !spotify.isPlaying || !viewActive)) { ctx in
-            let line = spotify.compactLine(at: ctx.date)
+            let k = spotify.compactKaraoke(at: ctx.date)
+            let line = k.text
             HStack(spacing: 6) {
                 CompactSpotifyOverlay.equalizer(ctx.date.timeIntervalSinceReferenceDate)
-                Text(line)
+                CompactSpotifyOverlay.karaoke(line, sung: k.sung, rest: .white.opacity(0.92))
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.92))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .id(line)
