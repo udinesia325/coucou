@@ -54,26 +54,16 @@ enum LRC {
         return (trimmed, marks.map { .init(time: $0.time, offset: min($0.offset, trimmed.count)) })
     }
 
-    /// How many characters of line `i` are sung at `position` (fractional), for karaoke.
-    /// Word tags when the LRC has them; otherwise the line fills at ~0.13 s per character
-    /// (never past the next line, so it doesn't creep through an instrumental break).
-    static func sung(in lines: [LyricLine], index i: Int, at position: Double) -> Double {
+    /// How many characters of line `i` are sung at `position`, for karaoke. Enhanced LRC:
+    /// whole words, each from its own word tag. Line-synced only: the whole line at once.
+    static func sung(in lines: [LyricLine], index i: Int, at position: Double) -> Int {
         let line = lines[i], n = line.text.count
-        guard n > 0 else { return 0 }
-        let next = lines.indices.contains(i + 1) ? lines[i + 1].time : .infinity
-        var points = [(t: line.time, c: 0.0)] + line.marks.map { (t: $0.time, c: Double($0.offset)) }
-        if points.last!.c < Double(n) {
-            let end = line.marks.isEmpty
-                ? min(next, line.time + max(1.2, Double(n) * 0.13))
-                : min(next, points.last!.t + 0.6)
-            points.append((t: max(end, points.last!.t + 0.01), c: Double(n)))
+        guard position >= line.time else { return 0 }
+        guard let k = line.marks.lastIndex(where: { $0.time <= position }) else {
+            return line.marks.isEmpty ? n : 0
         }
-        if position <= points[0].t { return 0 }
-        for k in 1..<points.count where position < points[k].t {
-            let a = points[k - 1], b = points[k]
-            return a.c + (b.c - a.c) * (position - a.t) / (b.t - a.t)
-        }
-        return Double(n)
+        // The word starting at mark k runs to the next mark (or the end of the line).
+        return line.marks.indices.contains(k + 1) ? line.marks[k + 1].offset : n
     }
 
     /// Index of the line being sung at `position`, nil before the first line.

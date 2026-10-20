@@ -155,7 +155,7 @@ final class SpotifyController: ObservableObject {
     func compactKaraoke(at date: Date) -> (text: String, sung: Int) {
         let p = position(at: date) + 0.25
         if case .synced(let lines) = lyrics, let i = LRC.index(in: lines, at: p) {
-            return lines[i].text.isEmpty ? ("♪ ♪ ♪", 0) : (lines[i].text, Int(LRC.sung(in: lines, index: i, at: p)))
+            return lines[i].text.isEmpty ? ("♪ ♪ ♪", 0) : (lines[i].text, LRC.sung(in: lines, index: i, at: p))
         }
         return ([title, artist].compactMap { $0 }.joined(separator: " — "), 0)
     }
@@ -632,14 +632,14 @@ struct SpotifyView: View {
             }
             switch spotify.lyrics {
             case .synced(let lines):
-                // 20 fps while playing: the current line fills character by character.
+                // 20 fps while playing: enhanced lyrics light up word by word.
                 TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !(active && spotify.isPlaying))) { ctx in
                     let p = spotify.position(at: ctx.date) + 0.25
                     let i = LRC.index(in: lines, at: p)
                     VStack(alignment: .leading, spacing: 5) {
                         lyric(i.flatMap { $0 > 0 ? lines[$0 - 1].text : nil }, current: false)
                         lyric(i.map { lines[$0].text.isEmpty ? "♪" : lines[$0].text } ?? "♪", current: true,
-                              sung: i.map { Int(LRC.sung(in: lines, index: $0, at: p)) } ?? 0)
+                              sung: i.map { LRC.sung(in: lines, index: $0, at: p) } ?? 0)
                         lyric(lines.indices.contains((i ?? -1) + 1) ? lines[(i ?? -1) + 1].text : nil, current: false)
                     }
                     .animation(.easeInOut(duration: 0.25), value: i)
@@ -714,7 +714,7 @@ struct CompactSpotifyOverlay: View {
         .allowsHitTesting(false)
     }
 
-    /// A lyric line whose first `sung` characters are Spotify green: karaoke, character by character.
+    /// A lyric line whose first `sung` characters (whole words, or the whole line) are Spotify green.
     static func karaoke(_ text: String, sung: Int, rest: Color) -> Text {
         Text(text.prefix(sung)).foregroundColor(SpotifyController.green)
             + Text(text.dropFirst(sung)).foregroundColor(rest)
