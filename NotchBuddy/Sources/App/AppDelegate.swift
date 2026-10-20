@@ -328,7 +328,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = MusicController.shared
         MailController.shared.start()
         WhatsAppController.shared.start()
-        MacUpdater.shared.start()
+        // fork: no updater — it offers Louis-CFM releases, which would replace this build.
+        // MacUpdater.shared.start()
         ClaudeDesktopChatWatcher.shared.start()
         #endif
         CryptoController.shared.start()
