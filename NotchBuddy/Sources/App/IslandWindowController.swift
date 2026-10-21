@@ -25,6 +25,8 @@ final class IslandWindowController: NSWindowController {
     private var fullscreenOrderTask: Task<Void, Never>?
     private var lastFullscreenCheck = Date.distantPast
     private var lastSpaceHeal = Date.distantPast
+    private var spaceHealAttempts = 0
+    private var spaceHealing = false
     private var menuBarDetectionWorks = false
     private var topEdgeTouched = Date.distantPast
     private var lastScreen: NSScreen?
@@ -610,6 +612,8 @@ final class IslandWindowController: NSWindowController {
         let center = NSWorkspace.shared.notificationCenter
         let recheck: @Sendable (Notification) -> Void = { [weak self] _ in
             Task { @MainActor [weak self] in
+                self?.spaceHealAttempts = 0   // a Space change earns a fresh set of re-pin tries
+                self?.lastSpaceHeal = .distantPast
                 // Re-check while the fullscreen animation settles (Chrome's takes over a second).
                 for delay: UInt64 in [0, 400_000_000, 600_000_000, 1_000_000_000] {
                     try? await Task.sleep(nanoseconds: delay)
@@ -723,7 +727,7 @@ final class IslandWindowController: NSWindowController {
         }
         // Self-heal: the island should be up but its window isn't on screen (hidden by AppKit
         // or anything else) — bring it back.
-        if !hiddenForFullscreen && !panel.isVisible {
+        if !hiddenForFullscreen && !panel.isVisible && !spaceHealing {
             panel.orderFrontRegardless()
             state.fullscreenHidden = false
             logFullscreenDiag("selfHeal")
@@ -731,18 +735,34 @@ final class IslandWindowController: NSWindowController {
         // Ordered out on a fullscreen Space, then the user switched Space (a new Chrome
         // incognito window…): WindowServer keeps the panel pinned to that old Space, so it
         // stays "visible" yet shows nowhere. Re-register it for all Spaces.
-        if !hiddenForFullscreen && panel.isVisible && !panel.isOnActiveSpace,
-           Date().timeIntervalSince(lastSpaceHeal) > 1 {
-            lastSpaceHeal = Date()
-            panel.orderOut(nil)
-            let behavior = panel.collectionBehavior
-            panel.collectionBehavior = []
-            panel.collectionBehavior = behavior
-            panel.orderFrontRegardless()
-            logFullscreenDiag("spaceHeal")
+        if !hiddenForFullscreen && panel.isVisible && !panel.isOnActiveSpace {
+            // ponytail: 5 tries with 1-2-4-8-16 s backoff, then idle until the next Space change.
+            if !spaceHealing, spaceHealAttempts < 5, Date() >= lastSpaceHeal {
+                lastSpaceHeal = Date().addingTimeInterval(TimeInterval(1 << spaceHealAttempts))
+                spaceHealAttempts += 1
+                repinToAllSpaces(panel)
+            }
+        } else if panel.isOnActiveSpace || hiddenForFullscreen {
+            spaceHealAttempts = 0
         }
         if !hide, let screen = panel.screen { lastScreen = screen }
         return hide
+    }
+
+    /// Drops the panel's Space registration and restores it one beat later. Done in one runloop
+    /// tick the ordering collapses into a no-op in WindowServer, which is why it never healed.
+    private func repinToAllSpaces(_ panel: IslandPanel) {
+        spaceHealing = true
+        let behavior = panel.collectionBehavior
+        panel.orderOut(nil)
+        panel.collectionBehavior = []
+        Task { @MainActor [weak self, weak panel] in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            panel?.collectionBehavior = behavior
+            panel?.orderFrontRegardless()
+            self?.spaceHealing = false
+            self?.logFullscreenDiag("spaceHeal#\(self?.spaceHealAttempts ?? 0)")
+        }
     }
 
     // MARK: - Bot-head hover (love emote — mirrors prototype botHover())
