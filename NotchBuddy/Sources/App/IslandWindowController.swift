@@ -24,8 +24,7 @@ final class IslandWindowController: NSWindowController {
     private var hiddenForFullscreen = false
     private var fullscreenOrderTask: Task<Void, Never>?
     private var lastFullscreenCheck = Date.distantPast
-    private var lastSpaceHeal = Date.distantPast
-    private var spaceHealAttempts = 0
+    private var presenceWatchdog: Timer?
     private var spaceHealing = false
     private var menuBarDetectionWorks = false
     private var topEdgeTouched = Date.distantPast
@@ -612,12 +611,10 @@ final class IslandWindowController: NSWindowController {
         let center = NSWorkspace.shared.notificationCenter
         let recheck: @Sendable (Notification) -> Void = { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.spaceHealAttempts = 0   // a Space change earns a fresh set of re-pin tries
-                self?.lastSpaceHeal = .distantPast
                 // Re-check while the fullscreen animation settles (Chrome's takes over a second).
                 for delay: UInt64 in [0, 400_000_000, 600_000_000, 1_000_000_000] {
                     try? await Task.sleep(nanoseconds: delay)
-                    self?.refreshFullscreenSpace()
+                    self?.checkIslandPresence()
                 }
             }
         }
@@ -626,7 +623,34 @@ final class IslandWindowController: NSWindowController {
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main, using: recheck)
-        refreshFullscreenSpace()
+        // ponytail: events above catch nearly everything; this 3 s watchdog is the backstop for
+        // whatever slips through (menu bar sliding back on its own, a Space pin WindowServer lost).
+        let timer = Timer(timeInterval: 3, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.screenOff else { return }
+                self.checkIslandPresence()
+            }
+        }
+        timer.tolerance = 1   // let macOS coalesce it with other wakeups
+        RunLoop.main.add(timer, forMode: .common)
+        presenceWatchdog = timer
+        checkIslandPresence()
+    }
+
+    /// Samples the menu bar and, if the island should be up but WindowServer says its window
+    /// isn't on screen, brings it back. Runs on Space/app/screen changes and every 3 s — never
+    /// per frame: both checks are WindowServer round trips.
+    private func checkIslandPresence() {
+        if state.hideWithMenuBar { lastFullscreenCheck = Date(); refreshFullscreenSpace() }
+        // Not visible at all is the per-tick selfHeal's job (a local flag, free to read).
+        guard let panel = window as? IslandPanel, !hiddenForFullscreen, !spaceHealing, panel.isVisible else { return }
+        // Ordered out on a fullscreen Space, then the user switched Space (a new Chrome
+        // incognito window…): WindowServer keeps the panel pinned to that old Space, so it
+        // stays "visible" yet shows nowhere. Re-register it for all Spaces — only when
+        // WindowServer itself confirms it's off screen, so a wrong isOnActiveSpace never flickers it.
+        guard !panel.isOnActiveSpace else { return }
+        let info = CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(panel.windowNumber)) as? [[String: Any]]
+        if (info?.first?[kCGWindowIsOnscreen as String] as? Bool) != true { repinToAllSpaces(panel) }
     }
 
     /// Follows the real menu bar: the "Window Server" menu bar window (main-menu level) sits at
@@ -681,10 +705,11 @@ final class IslandWindowController: NSWindowController {
     private func updateFullscreenVisibility(panel: IslandPanel, mouse: NSPoint) -> Bool {
         // "Always show": no sampling at all, and an island hidden a moment ago slides back.
         if !state.hideWithMenuBar { fullscreenSpace = false }
-        // Sample the menu bar 6×/s while it is hidden (to catch it sliding back), 1×/s otherwise.
-        // Time-based: the poll runs anywhere from 8 to 30 Hz.
-        if state.hideWithMenuBar,
-           Date().timeIntervalSince(lastFullscreenCheck) >= (fullscreenSpace || hiddenForFullscreen ? 1.0 / 6 : 1) {
+        // Sample the menu bar 6×/s only for 3 s after the pointer touched the top edge (the menu bar
+        // is sliding in/out under it); otherwise Space-change events and the 3 s watchdog cover it.
+        // Each sample lists every window on screen, so it must not run per tick.
+        if state.hideWithMenuBar, Date().timeIntervalSince(topEdgeTouched) < 3,
+           Date().timeIntervalSince(lastFullscreenCheck) >= 1.0 / 6 {
             lastFullscreenCheck = Date()
             refreshFullscreenSpace()
         }
@@ -732,19 +757,7 @@ final class IslandWindowController: NSWindowController {
             state.fullscreenHidden = false
             logFullscreenDiag("selfHeal")
         }
-        // Ordered out on a fullscreen Space, then the user switched Space (a new Chrome
-        // incognito window…): WindowServer keeps the panel pinned to that old Space, so it
-        // stays "visible" yet shows nowhere. Re-register it for all Spaces.
-        if !hiddenForFullscreen && panel.isVisible && !panel.isOnActiveSpace {
-            // ponytail: 5 tries with 1-2-4-8-16 s backoff, then idle until the next Space change.
-            if !spaceHealing, spaceHealAttempts < 5, Date() >= lastSpaceHeal {
-                lastSpaceHeal = Date().addingTimeInterval(TimeInterval(1 << spaceHealAttempts))
-                spaceHealAttempts += 1
-                repinToAllSpaces(panel)
-            }
-        } else if panel.isOnActiveSpace || hiddenForFullscreen {
-            spaceHealAttempts = 0
-        }
+        // Off-Space re-pin lives in checkIslandPresence (events + 3 s watchdog), not per tick.
         if !hide, let screen = panel.screen { lastScreen = screen }
         return hide
     }
@@ -761,7 +774,7 @@ final class IslandWindowController: NSWindowController {
             panel?.collectionBehavior = behavior
             panel?.orderFrontRegardless()
             self?.spaceHealing = false
-            self?.logFullscreenDiag("spaceHeal#\(self?.spaceHealAttempts ?? 0)")
+            self?.logFullscreenDiag("spaceHeal")
         }
     }
 
