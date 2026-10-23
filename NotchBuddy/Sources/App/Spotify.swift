@@ -5,7 +5,7 @@ import SwiftUI
 // MARK: - Spotify controller
 
 /// Follows Spotify through its distributed notification, drives it with AppleScript
-/// (never launches it), and fetches synced lyrics from lrclib.net. GitHub build only.
+/// (never launches it), and fetches synced lyrics from lrclib.net, Musixmatch and NetEase. GitHub build only.
 @MainActor
 final class SpotifyController: ObservableObject {
     static let shared = SpotifyController()
@@ -26,7 +26,7 @@ final class SpotifyController: ObservableObject {
     @Published private(set) var automationDenied = false
     @Published private(set) var isRunning = false
 
-    /// Lyrics come from lrclib.net (free, no account). Off = no lyrics request at all.
+    /// Lyrics come from lrclib.net, Musixmatch and NetEase (free, no account). Off = no lyrics request at all.
     @Published var lyricsEnabled: Bool = UserDefaults.standard.object(forKey: "spotifyLyricsEnabled") as? Bool ?? true {
         didSet {
             UserDefaults.standard.set(lyricsEnabled, forKey: "spotifyLyricsEnabled")
@@ -296,32 +296,43 @@ final class SpotifyController: ObservableObject {
         }
     }
 
-    // MARK: Lyrics (lrclib.net)
+    // MARK: Lyrics (lrclib.net, Musixmatch, NetEase)
 
     private struct LyricsPayload: Decodable, Sendable {
         let syncedLyrics: String?
         let plainLyrics: String?
     }
 
+    /// Asks every source at once and keeps the richest match: word-synced (Musixmatch richsync,
+    /// enhanced lrclib, NetEase yrc) beats line-synced (lrclib, NetEase) beats plain text.
     private func fetchLyrics() {
         lyricsTask?.cancel()
         guard lyricsEnabled, let title, let artist else { lyrics = .none; return }
         lyrics = .loading
         let albumName = album ?? "", seconds = Int(duration.rounded())
         lyricsTask = Task { [weak self] in
-            var exact = URLComponents(string: "https://lrclib.net/api/get")!
-            exact.queryItems = [.init(name: "track_name", value: title), .init(name: "artist_name", value: artist),
-                                .init(name: "album_name", value: albumName), .init(name: "duration", value: "\(seconds)")]
-            var search = URLComponents(string: "https://lrclib.net/api/search")!
-            search.queryItems = [.init(name: "track_name", value: title), .init(name: "artist_name", value: artist)]
-
-            var payload: LyricsPayload? = await Self.get(exact.url!)
-            if payload?.syncedLyrics == nil, let found: [LyricsPayload] = await Self.get(search.url!) {
-                payload = found.first { $0.syncedLyrics != nil } ?? found.first ?? payload
-            }
+            async let lib = Self.lrclib(title, artist, albumName, seconds)
+            async let mxm = Self.musixmatch(title, artist, seconds)
+            async let ne = Self.netease(title, artist, seconds)
+            let (payload, richsync, netease) = await (lib, mxm, ne)
             guard !Task.isCancelled, let self else { return }
-            if let synced = payload?.syncedLyrics.map(LRC.parse), !synced.isEmpty {
+
+            let synced = payload?.syncedLyrics.map(LRC.parse) ?? []
+            // A word-synced source from another catalog may time a different recording: when lrclib
+            // has lines too, its first sung line must start within 2 s of lrclib's.
+            func sameRecording(_ lines: [LyricLine]) -> Bool {
+                guard let a = synced.first(where: { !$0.text.isEmpty }),
+                      let b = lines.first(where: { !$0.text.isEmpty }) else { return true }
+                return abs(a.time - b.time) < 2
+            }
+            if let words = [richsync, synced, netease.words].first(where: {
+                $0.contains { !$0.marks.isEmpty } && sameRecording($0)
+            }) {
+                self.lyrics = .synced(words)
+            } else if !synced.isEmpty {
                 self.lyrics = .synced(synced)
+            } else if netease.lines.count > 3 {   // shorter: "no lyrics" / "instrumental" placeholders
+                self.lyrics = .synced(netease.lines)
             } else if let plain = payload?.plainLyrics, !plain.isEmpty {
                 self.lyrics = .plain(plain)
             } else {
@@ -330,13 +341,111 @@ final class SpotifyController: ObservableObject {
         }
     }
 
-    private nonisolated static func get<T: Decodable & Sendable>(_ url: URL) async -> T? {
+    private nonisolated static func lrclib(_ title: String, _ artist: String, _ album: String, _ seconds: Int) async -> LyricsPayload? {
+        var exact = URLComponents(string: "https://lrclib.net/api/get")!
+        exact.queryItems = [.init(name: "track_name", value: title), .init(name: "artist_name", value: artist),
+                            .init(name: "album_name", value: album), .init(name: "duration", value: "\(seconds)")]
+        var search = URLComponents(string: "https://lrclib.net/api/search")!
+        search.queryItems = [.init(name: "track_name", value: title), .init(name: "artist_name", value: artist)]
+
+        var payload: LyricsPayload? = await get(exact.url!)
+        if payload?.syncedLyrics == nil, let found: [LyricsPayload] = await get(search.url!) {
+            // Enhanced (word-tagged) LRC first, then any synced, then plain.
+            payload = found.first { $0.syncedLyrics?.contains("<") == true } ?? found.first { $0.syncedLyrics != nil }
+                ?? found.first ?? payload
+        }
+        return payload
+    }
+
+    /// Musixmatch's per-word "richsync", through the anonymous token its desktop/iOS apps use.
+    private nonisolated static func musixmatch(_ title: String, _ artist: String, _ seconds: Int) async -> [LyricLine] {
+        guard let track = await musixmatchCall("matcher.track.get", [
+                  .init(name: "q_track", value: title), .init(name: "q_artist", value: artist),
+                  .init(name: "q_duration", value: "\(seconds)")])?["track"] as? [String: Any],
+              track["has_richsync"] as? Int == 1, let id = track["track_id"] as? Int,
+              let rich = await musixmatchCall("track.richsync.get", [.init(name: "track_id", value: "\(id)")])?["richsync"]
+                  as? [String: Any],
+              let body = rich["richsync_body"] as? String else { return [] }
+        return LRC.parseRichsync(body)
+    }
+
+    private nonisolated static let musixmatchToken = MusixmatchToken()
+
+    /// The `body` of a Musixmatch API call, nil on any error (a 401 drops the token for the next track).
+    private nonisolated static func musixmatchCall(_ method: String, _ items: [URLQueryItem]) async -> [String: Any]? {
+        guard let token = await musixmatchToken.get() else { return nil }
+        var url = URLComponents(string: "https://apic.musixmatch.com/ws/1.1/\(method)")!
+        url.queryItems = [.init(name: "app_id", value: MusixmatchToken.appId), .init(name: "usertoken", value: token),
+                          .init(name: "format", value: "json")] + items
+        let message = (await json(url.url!) as? [String: Any])?["message"] as? [String: Any]
+        let status = (message?["header"] as? [String: Any])?["status_code"] as? Int
+        if status == 401 { await musixmatchToken.reset() }
+        return status == 200 ? message?["body"] as? [String: Any] : nil
+    }
+
+    /// NetEase Cloud Music: word-synced "yrc" and line-synced LRC, from the first search hit whose
+    /// length matches the track (within 3 s) and has lyrics.
+    private nonisolated static func netease(_ title: String, _ artist: String, _ seconds: Int) async
+        -> (words: [LyricLine], lines: [LyricLine]) {
+        var search = URLComponents(string: "https://music.163.com/api/search/get")!
+        search.queryItems = [.init(name: "s", value: "\(title) \(artist)"), .init(name: "type", value: "1"),
+                             .init(name: "limit", value: "8")]
+        let songs = ((await json(search.url!) as? [String: Any])?["result"] as? [String: Any])?["songs"] as? [[String: Any]] ?? []
+        var lines: [LyricLine] = []
+        for song in songs.filter({ abs(($0["duration"] as? Double ?? 0) / 1000 - Double(seconds)) <= 3 }).prefix(3) {
+            guard let id = song["id"] as? Int,
+                  let lyric = await json(URL(string: "https://music.163.com/api/song/lyric/v1?id=\(id)&lv=-1&yv=-1")!)
+                      as? [String: Any] else { continue }
+            func text(_ key: String) -> String { (lyric[key] as? [String: Any])?["lyric"] as? String ?? "" }
+            if lines.isEmpty { lines = LRC.parse(text("lrc")) }
+            let words = LRC.parseYRC(text("yrc"))
+            if !words.isEmpty { return (words, LRC.parse(text("lrc"))) }
+        }
+        return ([], lines)
+    }
+
+    private nonisolated static func data(_ url: URL) async -> Data? {
         var request = URLRequest(url: url)
         request.setValue("Coucou (https://github.com/louis-cfm/coucou)", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 10
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return data
+    }
+
+    private nonisolated static func get<T: Decodable & Sendable>(_ url: URL) async -> T? {
+        guard let data = await data(url) else { return nil }
         return try? JSONDecoder().decode(T.self, from: data)
     }
+
+    private nonisolated static func json(_ url: URL) async -> Any? {
+        guard let data = await data(url) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data)
+    }
+}
+
+/// Musixmatch's anonymous app token, kept for the session. Musixmatch answers a captcha when
+/// tokens are asked for too often, so after a refusal it waits 10 minutes before asking again.
+private actor MusixmatchToken {
+    static let appId = "mac-ios-v2.0"
+    private var token: String?
+    private var retryAfter = Date.distantPast
+
+    func get() async -> String? {
+        if let token { return token }
+        guard Date() >= retryAfter else { return nil }
+        retryAfter = Date().addingTimeInterval(600)
+        var url = URLComponents(string: "https://apic.musixmatch.com/ws/1.1/token.get")!
+        url.queryItems = [.init(name: "app_id", value: Self.appId), .init(name: "guid", value: UUID().uuidString)]
+        guard let (data, _) = try? await URLSession.shared.data(from: url.url!),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let body = (root["message"] as? [String: Any])?["body"] as? [String: Any],
+              let value = body["user_token"] as? String, value.contains(where: { $0 != "0" }) else { return nil }
+        token = value
+        return value
+    }
+
+    func reset() { token = nil }
 }
 
 // MARK: - Expanded Spotify view
@@ -620,7 +729,7 @@ struct SpotifyView: View {
                 Text("Lyrics").font(.system(size: 10, weight: .semibold)).foregroundColor(Color(hex: "#6B7079"))
                 Spacer()
                 Menu {
-                    Toggle("Fetch lyrics (lrclib.net)", isOn: $spotify.lyricsEnabled)
+                    Toggle("Fetch lyrics (lrclib, Musixmatch, NetEase)", isOn: $spotify.lyricsEnabled)
                     Toggle("Lyric line in the compact notch", isOn: $spotify.lyricInNotch)
                 } label: {
                     Image(systemName: "ellipsis.circle").font(.system(size: 11))

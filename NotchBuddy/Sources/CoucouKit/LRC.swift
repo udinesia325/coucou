@@ -54,6 +54,54 @@ enum LRC {
         return (trimmed, marks.map { .init(time: $0.time, offset: min($0.offset, trimmed.count)) })
     }
 
+    /// Musixmatch richsync: a JSON array of lines `{"ts": start, "l": [{"c": chars, "o": offset from ts}]}`.
+    static func parseRichsync(_ json: String) -> [LyricLine] {
+        guard let rows = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [[String: Any]] else { return [] }
+        return rows.compactMap { row -> LyricLine? in
+            guard let ts = row["ts"] as? Double, let chunks = row["l"] as? [[String: Any]] else { return nil }
+            var text = "", marks: [LyricLine.Mark] = []
+            for chunk in chunks {
+                let c = chunk["c"] as? String ?? ""
+                if !c.trimmingCharacters(in: .whitespaces).isEmpty {
+                    marks.append(.init(time: ts + (chunk["o"] as? Double ?? 0), offset: text.count))
+                }
+                text += c
+            }
+            return trimmed(LyricLine(time: ts, text: text, marks: marks))
+        }.sorted { $0.time < $1.time }
+    }
+
+    /// NetEase yrc: "[startMs,durMs](wordStartMs,wordDurMs,0)word(…)word". JSON credit lines are skipped.
+    static func parseYRC(_ yrc: String) -> [LyricLine] {
+        var lines: [LyricLine] = []
+        for raw in yrc.split(whereSeparator: \.isNewline) where raw.hasPrefix("[") {
+            guard let close = raw.firstIndex(of: "]"),
+                  let start = raw.dropFirst().prefix(while: { $0 != "," }).nonEmptyDouble else { continue }
+            var rest = raw[raw.index(after: close)...]
+            var text = "", marks: [LyricLine.Mark] = []
+            while rest.hasPrefix("("), let end = rest.firstIndex(of: ")") {
+                let wordStart = rest.dropFirst().prefix(while: { $0 != "," }).nonEmptyDouble
+                rest = rest[rest.index(after: end)...]
+                let word = rest.prefix(while: { $0 != "(" })
+                rest = rest.dropFirst(word.count)
+                if let wordStart, !word.trimmingCharacters(in: .whitespaces).isEmpty {
+                    marks.append(.init(time: wordStart / 1000, offset: text.count))
+                }
+                text += word
+            }
+            lines.append(trimmed(LyricLine(time: start / 1000, text: text, marks: marks)))
+        }
+        return lines.sorted { $0.time < $1.time }
+    }
+
+    /// Trims the text, shifting word offsets past the dropped leading spaces.
+    private static func trimmed(_ line: LyricLine) -> LyricLine {
+        let lead = line.text.prefix(while: \.isWhitespace).count
+        let text = line.text.trimmingCharacters(in: .whitespaces)
+        return LyricLine(time: line.time, text: text,
+                         marks: line.marks.map { .init(time: $0.time, offset: min(max($0.offset - lead, 0), text.count)) })
+    }
+
     /// How many characters of line `i` are sung at `position`, for karaoke. Enhanced LRC:
     /// whole words, each from its own word tag. Line-synced only: the whole line at once.
     static func sung(in lines: [LyricLine], index i: Int, at position: Double) -> Int {
@@ -75,4 +123,8 @@ enum LRC {
         }
         return lo == 0 ? nil : lo - 1
     }
+}
+
+private extension Substring {
+    var nonEmptyDouble: Double? { isEmpty ? nil : Double(self) }
 }

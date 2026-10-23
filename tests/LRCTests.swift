@@ -42,6 +42,20 @@ enum LRCTests {
         precondition(LRC.sung(in: late, index: 0, at: 10.5) == 0 && LRC.sung(in: late, index: 0, at: 11) == 6)
         precondition(LRC.parse("[00:01.00]a <b> c")[0].text == "a <b> c")
 
-        print("LRC: 22 cases passed")
+        // Musixmatch richsync and NetEase yrc become word-marked lines.
+        let r = LRC.parseRichsync(#"[{"ts":27.3,"te":28.1,"l":[{"c":" I've","o":0},{"c":" ","o":0.2},{"c":"been","o":0.3}],"x":"I've been"}]"#)
+        precondition(r.map(\.text) == ["I've been"] && r[0].marks.map(\.offset) == [0, 5])
+        precondition(abs(r[0].marks[1].time - 27.6) < 0.001)
+        precondition(LRC.sung(in: r, index: 0, at: 27.4) == 5 && LRC.sung(in: r, index: 0, at: 27.7) == 9)
+        precondition(LRC.parseRichsync("nope").isEmpty)
+        let y = LRC.parseYRC("""
+        {"t":0,"c":[{"tx":"credits"}]}
+        [7370,1860](7370,300,0)Put (7670,150,0)your (7820,120,0)hands
+        [5000,500](5000,500,0)Yeah
+        """)
+        precondition(y.map(\.text) == ["Yeah", "Put your hands"] && y.map(\.time) == [5, 7.37])
+        precondition(y[1].marks.map(\.offset) == [0, 4, 9] && y[1].marks.map(\.time) == [7.37, 7.67, 7.82])
+
+        print("LRC: 31 cases passed")
     }
 }
