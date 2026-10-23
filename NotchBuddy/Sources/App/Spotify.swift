@@ -299,6 +299,8 @@ final class SpotifyController: ObservableObject {
     // MARK: Lyrics (lrclib.net, Musixmatch, NetEase)
 
     private struct LyricsPayload: Decodable, Sendable {
+        let trackName: String?
+        let artistName: String?
         let syncedLyrics: String?
         let plainLyrics: String?
     }
@@ -349,7 +351,10 @@ final class SpotifyController: ObservableObject {
         search.queryItems = [.init(name: "track_name", value: title), .init(name: "artist_name", value: artist)]
 
         var payload: LyricsPayload? = await get(exact.url!)
-        if payload?.syncedLyrics == nil, let found: [LyricsPayload] = await get(search.url!) {
+        if payload?.syncedLyrics == nil, let all: [LyricsPayload] = await get(search.url!) {
+            let found = all.filter {
+                LRC.sameSong(title: title, artist: artist, hitTitle: $0.trackName ?? "", hitArtists: [$0.artistName ?? ""])
+            }
             // Enhanced (word-tagged) LRC first, then any synced, then plain.
             payload = found.first { $0.syncedLyrics?.contains("<") == true } ?? found.first { $0.syncedLyrics != nil }
                 ?? found.first ?? payload
@@ -363,6 +368,8 @@ final class SpotifyController: ObservableObject {
                   .init(name: "q_track", value: title), .init(name: "q_artist", value: artist),
                   .init(name: "q_duration", value: "\(seconds)")])?["track"] as? [String: Any],
               track["has_richsync"] as? Int == 1, let id = track["track_id"] as? Int,
+              LRC.sameSong(title: title, artist: artist, hitTitle: track["track_name"] as? String ?? "",
+                           hitArtists: [track["artist_name"] as? String ?? ""]),
               let rich = await musixmatchCall("track.richsync.get", [.init(name: "track_id", value: "\(id)")])?["richsync"]
                   as? [String: Any],
               let body = rich["richsync_body"] as? String else { return [] }
@@ -383,8 +390,8 @@ final class SpotifyController: ObservableObject {
         return status == 200 ? message?["body"] as? [String: Any] : nil
     }
 
-    /// NetEase Cloud Music: word-synced "yrc" and line-synced LRC, from the first search hit whose
-    /// length matches the track (within 3 s) and has lyrics.
+    /// NetEase Cloud Music: word-synced "yrc" and line-synced LRC, from the first search hit with the
+    /// same title and artist whose length matches the track (within 3 s) and has lyrics.
     private nonisolated static func netease(_ title: String, _ artist: String, _ seconds: Int) async
         -> (words: [LyricLine], lines: [LyricLine]) {
         var search = URLComponents(string: "https://music.163.com/api/search/get")!
@@ -392,7 +399,12 @@ final class SpotifyController: ObservableObject {
                              .init(name: "limit", value: "8")]
         let songs = ((await json(search.url!) as? [String: Any])?["result"] as? [String: Any])?["songs"] as? [[String: Any]] ?? []
         var lines: [LyricLine] = []
-        for song in songs.filter({ abs(($0["duration"] as? Double ?? 0) / 1000 - Double(seconds)) <= 3 }).prefix(3) {
+        let hits = songs.filter { song in
+            abs((song["duration"] as? Double ?? 0) / 1000 - Double(seconds)) <= 3
+                && LRC.sameSong(title: title, artist: artist, hitTitle: song["name"] as? String ?? "",
+                                hitArtists: (song["artists"] as? [[String: Any]] ?? []).compactMap { $0["name"] as? String })
+        }
+        for song in hits.prefix(3) {
             guard let id = song["id"] as? Int,
                   let lyric = await json(URL(string: "https://music.163.com/api/song/lyric/v1?id=\(id)&lv=-1&yv=-1")!)
                       as? [String: Any] else { continue }

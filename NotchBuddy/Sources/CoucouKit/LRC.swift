@@ -102,6 +102,19 @@ enum LRC {
                          marks: line.marks.map { .init(time: $0.time, offset: min(max($0.offset - lead, 0), text.count)) })
     }
 
+    /// Whether a search hit from a lyrics catalog is the playing song: same title (ignoring case,
+    /// accents, "(feat. …)" / " - Remastered" suffixes and punctuation) and one artist in common.
+    static func sameSong(title: String, artist: String, hitTitle: String, hitArtists: [String]) -> Bool {
+        func key(_ s: String, cut: Bool) -> String {
+            var s = s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            if cut, let i = s.firstIndex(where: { "([".contains($0) }) ?? s.range(of: " - ")?.lowerBound { s = String(s[..<i]) }
+            return String(s.unicodeScalars.filter(CharacterSet.alphanumerics.contains).map(Character.init))
+        }
+        let t = key(title, cut: true), h = key(hitTitle, cut: true), a = key(artist, cut: false)
+        guard !t.isEmpty, t == h else { return false }
+        return hitArtists.contains { let k = key($0, cut: false); return !k.isEmpty && (a.contains(k) || k.contains(a)) }
+    }
+
     /// How many characters of line `i` are sung at `position`, for karaoke. Enhanced LRC:
     /// whole words, each from its own word tag. Line-synced only: the whole line at once.
     static func sung(in lines: [LyricLine], index i: Int, at position: Double) -> Int {

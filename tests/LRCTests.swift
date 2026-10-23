@@ -56,6 +56,13 @@ enum LRCTests {
         precondition(y.map(\.text) == ["Yeah", "Put your hands"] && y.map(\.time) == [5, 7.37])
         precondition(y[1].marks.map(\.offset) == [0, 4, 9] && y[1].marks.map(\.time) == [7.37, 7.67, 7.82])
 
-        print("LRC: 31 cases passed")
+        // Search hits must be the same song, not just the same length.
+        precondition(LRC.sameSong(title: "Ingin Bertemu", artist: "JKT48", hitTitle: "Ingin Bertemu", hitArtists: ["JKT48"]))
+        precondition(!LRC.sameSong(title: "Ingin Bertemu", artist: "JKT48", hitTitle: "Paradise", hitArtists: ["Coldplay"]))
+        precondition(!LRC.sameSong(title: "Ingin Bertemu", artist: "JKT48", hitTitle: "Ingin Bertemu", hitArtists: ["Someone"]))
+        precondition(LRC.sameSong(title: "Café - Remastered 2011", artist: "Beyoncé, JAY-Z", hitTitle: "Cafe (feat. X)", hitArtists: ["Beyonce"]))
+        precondition(!LRC.sameSong(title: "Love", artist: "A", hitTitle: "Lovely", hitArtists: ["A"]))
+
+        print("LRC: 36 cases passed")
     }
 }
