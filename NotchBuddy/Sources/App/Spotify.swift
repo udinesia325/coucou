@@ -87,15 +87,20 @@ final class SpotifyController: ObservableObject {
         let durationMs, position: Double?
     }
 
+    /// Publishes only real changes: every @Published write re-renders all Spotify views.
+    private func update<T: Equatable>(_ key: ReferenceWritableKeyPath<SpotifyController, T>, _ value: T) {
+        if self[keyPath: key] != value { self[keyPath: key] = value }
+    }
+
     private func apply(_ u: PlayerUpdate) {
-        isRunning = true
+        update(\.isRunning, true)
         guard u.state != "Stopped" else { clear(); return }
         let wasPlaying = isPlaying
-        isPlaying = u.state == "Playing"
-        if let n = u.name { title = n }
-        if let a = u.artist { artist = a }
-        if let a = u.album { album = a }
-        if let d = u.durationMs, d > 0 { duration = d / 1000 }
+        update(\.isPlaying, u.state == "Playing")
+        if let n = u.name { update(\.title, n) }
+        if let a = u.artist { update(\.artist, a) }
+        if let a = u.album { update(\.album, a) }
+        if let d = u.durationMs, d > 0 { update(\.duration, d / 1000) }
         if let p = u.position { setPosition(p) } else { setPosition(position()) }
         if let id = u.trackId, id != trackId {
             trackId = id
@@ -139,8 +144,20 @@ final class SpotifyController: ObservableObject {
     // MARK: Position
 
     private func setPosition(_ seconds: Double) {
+        let jumped = abs(position() - seconds) > 0.3
         positionBase = seconds
         positionAt = Date()
+        if jumped { objectWillChange.send() }   // seek or drift: lyric views rebuild their schedule
+    }
+
+    /// When the shown lyric next changes (a line or a word starts): lyric views redraw only then.
+    func lyricSchedule(from now: Date = Date()) -> [Date] {
+        guard isPlaying, case .synced(let lines) = lyrics else { return [] }
+        let p = position(at: now) + 0.25
+        return lines.flatMap { [$0.time] + $0.marks.map(\.time) }
+            .filter { $0 > p }
+            .sorted()
+            .map { now.addingTimeInterval($0 - p + 0.01) }
     }
 
     func position(at date: Date = Date()) -> Double {
@@ -168,8 +185,8 @@ final class SpotifyController: ObservableObject {
 
     /// Reads the full player state. Never launches Spotify.
     func refresh() {
-        guard Self.running() else { isRunning = false; return }
-        isRunning = true
+        guard Self.running() else { update(\.isRunning, false); return }
+        update(\.isRunning, true)
         Task {
             let result = await Self.run("""
                 tell application id "com.spotify.client"
@@ -186,21 +203,21 @@ final class SpotifyController: ObservableObject {
                 """)
             switch result {
             case .denied:
-                automationDenied = true
+                update(\.automationDenied, true)
             case .failed:
                 break
             case .values(let v):
-                automationDenied = false
+                update(\.automationDenied, false)
                 guard v.first != "stopped" else { clear(); return }
                 guard v.count >= 10 else { return }
                 let wasPlaying = isPlaying
-                isPlaying = v[0] == "playing"
+                update(\.isPlaying, v[0] == "playing")
                 if let p = Self.number(v[1]) { setPosition(p) }
-                shuffling = v[2] == "true"
-                if let vol = Self.number(v[3]) { volume = vol }
-                artworkURL = URL(string: v[4])
-                if let d = Self.number(v[5]), d > 0 { duration = d / 1000 }
-                title = v[6]; artist = v[7]; album = v[8]
+                update(\.shuffling, v[2] == "true")
+                if let vol = Self.number(v[3]) { update(\.volume, vol) }
+                update(\.artworkURL, URL(string: v[4]))
+                if let d = Self.number(v[5]), d > 0 { update(\.duration, d / 1000) }
+                update(\.title, v[6]); update(\.artist, v[7]); update(\.album, v[8])
                 if v[9] != trackId { trackId = v[9]; fetchLyrics() }
                 syncAppState()
                 if isPlaying && !wasPlaying {
@@ -228,8 +245,8 @@ final class SpotifyController: ObservableObject {
     }
 
     func playPause() {
+        setPosition(position())              // before the toggle: freeze/resume from the right spot
         isPlaying.toggle()                   // optimistic; refresh() corrects it
-        setPosition(position())
         command("playpause")
     }
     func next()     { command("next track") }
@@ -774,8 +791,8 @@ struct SpotifyView: View {
             }
             switch spotify.lyrics {
             case .synced(let lines):
-                // 20 fps while playing: enhanced lyrics light up word by word.
-                TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !(active && spotify.isPlaying))) { ctx in
+                // Redraws only when a line or a word starts.
+                TimelineView(.explicit(active ? spotify.lyricSchedule() : [])) { ctx in
                     let p = spotify.position(at: ctx.date) + 0.25
                     let i = LRC.index(in: lines, at: p)
                     VStack(alignment: .leading, spacing: 5) {
@@ -831,13 +848,12 @@ struct CompactSpotifyOverlay: View {
     let inline: Bool
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !spotify.isPlaying)) { ctx in
-            let t = ctx.date.timeIntervalSinceReferenceDate
+        // Redraws only when a line or a word starts (no per-frame animation).
+        TimelineView(.explicit(spotify.lyricSchedule())) { ctx in
             let k = spotify.compactKaraoke(at: ctx.date)
             ZStack(alignment: .topLeading) {
-                notes(t)
                 HStack(spacing: 6) {
-                    Self.equalizer(t)
+                    Self.equalizer
                     Self.karaoke(k.text, sung: k.sung, rest: .white.opacity(0.92))
                         .font(.system(size: 11, weight: .semibold))
                         .lineLimit(1)
@@ -862,31 +878,14 @@ struct CompactSpotifyOverlay: View {
             + Text(text.dropFirst(sung)).foregroundColor(rest)
     }
 
-    /// Three green bars bouncing out of phase.
-    static func equalizer(_ t: Double) -> some View {
+    /// Three still green bars: a "playing" mark that costs no frames.
+    static var equalizer: some View {
         HStack(alignment: .bottom, spacing: 1.5) {
-            ForEach(0..<3, id: \.self) { i in
-                Capsule()
-                    .fill(SpotifyController.green)
-                    .frame(width: 2.5, height: 3 + 7 * CGFloat(abs(sin(t * (5 + Double(i) * 1.7) + Double(i)))))
+            ForEach([6, 10, 4], id: \.self) { h in
+                Capsule().fill(SpotifyController.green).frame(width: 2.5, height: CGFloat(h))
             }
         }
         .frame(height: 11, alignment: .bottom)
-    }
-
-    /// Little ♪ ♫ that float up from Mochi and fade out.
-    private func notes(_ t: Double) -> some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(0..<3, id: \.self) { i in
-                let phase = (t / 2.2 + Double(i) / 3).truncatingRemainder(dividingBy: 1)
-                Text(i == 1 ? "♫" : "♪")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(SpotifyController.green)
-                    .opacity(sin(phase * .pi))
-                    .offset(x: 52 + CGFloat(i * 6) + 3 * CGFloat(sin(t * 3 + Double(i))),
-                            y: islandH * 0.75 - CGFloat(phase) * islandH * 0.7)
-            }
-        }
     }
 }
 // MARK: - Home Spotify card: the compact notch's lyric line
@@ -896,11 +895,11 @@ struct SpotifyLyricLine: View {
     @Environment(\.islandViewActive) private var viewActive
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !spotify.isPlaying || !viewActive)) { ctx in
+        TimelineView(.explicit(viewActive ? spotify.lyricSchedule() : [])) { ctx in
             let k = spotify.compactKaraoke(at: ctx.date)
             let line = k.text
             HStack(spacing: 6) {
-                CompactSpotifyOverlay.equalizer(ctx.date.timeIntervalSinceReferenceDate)
+                CompactSpotifyOverlay.equalizer
                 CompactSpotifyOverlay.karaoke(line, sung: k.sung, rest: .white.opacity(0.92))
                     .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1)
