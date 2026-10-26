@@ -305,21 +305,27 @@ final class SpotifyController: ObservableObject {
         let plainLyrics: String?
     }
 
-    /// Asks every source at once and keeps the richest match: word-synced (Musixmatch richsync,
-    /// enhanced lrclib, NetEase yrc) beats line-synced (lrclib, NetEase) beats plain text.
+    /// Lyrics already found this session, by Spotify track ID: replays and skipping back cost no request.
+    private var lyricsCache: [String: Lyrics] = [:]
+
+    /// Cheapest source first, stopping at the first word-synced match: lrclib (1–2 requests), then
+    /// Musixmatch richsync (2), then NetEase yrc (2–4). lrclib's line-synced lyrics show right away
+    /// while the others are asked for words. Word-synced beats line-synced beats plain text.
     private func fetchLyrics() {
         lyricsTask?.cancel()
-        guard lyricsEnabled, let title, let artist else { lyrics = .none; return }
+        guard lyricsEnabled, let title, let artist, let id = trackId else { lyrics = .none; return }
+        if let cached = lyricsCache[id] { lyrics = cached; return }
         lyrics = .loading
         let albumName = album ?? "", seconds = Int(duration.rounded())
         lyricsTask = Task { [weak self] in
-            async let lib = Self.lrclib(title, artist, albumName, seconds)
-            async let mxm = Self.musixmatch(title, artist, seconds)
-            async let ne = Self.netease(title, artist, seconds)
-            let (payload, richsync, netease) = await (lib, mxm, ne)
+            // Skipping through tracks: only the one that stays gets looked up.
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard !Task.isCancelled else { return }
+            let payload = await Self.lrclib(title, artist, albumName, seconds)
             guard !Task.isCancelled, let self else { return }
 
             let synced = payload?.syncedLyrics.map(LRC.parse) ?? []
+            func hasWords(_ lines: [LyricLine]) -> Bool { lines.contains { !$0.marks.isEmpty } }
             // A word-synced source from another catalog may time a different recording: when lrclib
             // has lines too, its first sung line must start within 2 s of lrclib's.
             func sameRecording(_ lines: [LyricLine]) -> Bool {
@@ -327,18 +333,31 @@ final class SpotifyController: ObservableObject {
                       let b = lines.first(where: { !$0.text.isEmpty }) else { return true }
                 return abs(a.time - b.time) < 2
             }
-            if let words = [richsync, synced, netease.words].first(where: {
-                $0.contains { !$0.marks.isEmpty } && sameRecording($0)
-            }) {
-                self.lyrics = .synced(words)
-            } else if !synced.isEmpty {
-                self.lyrics = .synced(synced)
+            func done(_ result: Lyrics) {
+                lyrics = result
+                if lyricsCache.count >= 100 { lyricsCache.removeAll() }   // ponytail: crude cap, LRU if it ever matters
+                lyricsCache[id] = result
+            }
+
+            if hasWords(synced) { return done(.synced(synced)) }
+            if !synced.isEmpty { lyrics = .synced(synced) }
+
+            let richsync = await Self.musixmatch(title, artist, seconds)
+            guard !Task.isCancelled else { return }
+            if hasWords(richsync) && sameRecording(richsync) { return done(.synced(richsync)) }
+
+            let netease = await Self.netease(title, artist, seconds)
+            guard !Task.isCancelled else { return }
+            if hasWords(netease.words) && sameRecording(netease.words) { return done(.synced(netease.words)) }
+
+            if !synced.isEmpty {
+                done(.synced(synced))
             } else if netease.lines.count > 3 {   // shorter: "no lyrics" / "instrumental" placeholders
-                self.lyrics = .synced(netease.lines)
+                done(.synced(netease.lines))
             } else if let plain = payload?.plainLyrics, !plain.isEmpty {
-                self.lyrics = .plain(plain)
+                done(.plain(plain))
             } else {
-                self.lyrics = .notFound
+                lyrics = .notFound   // not cached: may have been a network error
             }
         }
     }
