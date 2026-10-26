@@ -333,11 +333,7 @@ final class SpotifyController: ObservableObject {
                       let b = lines.first(where: { !$0.text.isEmpty }) else { return true }
                 return abs(a.time - b.time) < 2
             }
-            func done(_ result: Lyrics) {
-                lyrics = result
-                if lyricsCache.count >= 100 { lyricsCache.removeAll() }   // ponytail: crude cap, LRU if it ever matters
-                lyricsCache[id] = result
-            }
+            let done = { (result: Lyrics) in self.storeLyrics(result, for: id) }
 
             if hasWords(synced) { return done(.synced(synced)) }
             if !synced.isEmpty { lyrics = .synced(synced) }
@@ -360,6 +356,12 @@ final class SpotifyController: ObservableObject {
                 lyrics = .notFound   // not cached: may have been a network error
             }
         }
+    }
+
+    private func storeLyrics(_ result: Lyrics, for id: String) {
+        lyrics = result
+        if lyricsCache.count >= 100 { lyricsCache.removeAll() }   // ponytail: crude cap, LRU if it ever matters
+        lyricsCache[id] = result
     }
 
     private nonisolated static func lrclib(_ title: String, _ artist: String, _ album: String, _ seconds: Int) async -> LyricsPayload? {
