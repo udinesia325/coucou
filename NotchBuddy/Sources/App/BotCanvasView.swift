@@ -27,7 +27,9 @@ struct BotCanvasView: View {
             let frame = timeline.date
             Canvas { context, size in
                 _ = frame
-                let look = lookXY(state: state)
+                // Compact and idle: Mochi stands straight and looks ahead, not where the pointer last was.
+                let straight = state.mode == .compact && state.effectiveState == .idle
+                let look = straight ? (x: CGFloat(0), y: CGFloat(0)) : lookXY(state: state)
                 engine.lookX = look.x
                 engine.lookY = look.y
                 engine.particleOverhang = particleOverhang

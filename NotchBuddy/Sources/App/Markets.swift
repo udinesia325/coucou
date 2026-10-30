@@ -347,9 +347,14 @@ private struct QuoteRow: View {
                 .frame(width: 40, height: 20)
             VStack(alignment: .trailing, spacing: 1) {
                 Text(MarketsStore.format(quote.price)).font(.system(size: 11.5, weight: .semibold).monospacedDigit())
-                Text(MarketsStore.format(quote.change, signed: true))
-                    .font(.system(size: 10, weight: .medium).monospacedDigit())
-                    .foregroundColor(color)
+                HStack(spacing: 4) {
+                    Text(MarketsStore.format(quote.change, signed: true))
+                    if quote.previousClose != 0 {
+                        Text(MarketsStore.format(quote.change / quote.previousClose * 100, signed: true, digits: 2) + "%")
+                    }
+                }
+                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                .foregroundColor(color)
             }
             .lineLimit(1)
             .fixedSize()

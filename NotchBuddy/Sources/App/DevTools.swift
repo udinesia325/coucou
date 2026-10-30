@@ -588,7 +588,7 @@ private struct DevPortRow: View {
                 .frame(width: 6, height: 6)
             Text(title).font(.system(size: 11)).foregroundColor(Color(hex: "#E5E7EB")).lineLimit(1)
             Spacer(minLength: 2)
-            Text(":\(port)").font(.system(size: 10, design: .monospaced)).foregroundColor(Color(hex: "#8E939C"))
+            Text(verbatim: ":\(port)").font(.system(size: 10, design: .monospaced)).foregroundColor(Color(hex: "#8E939C"))
             if open {
                 TwoTapStopButton(help: "Stop what listens on \(port)") { store.stop(port: port) }
             }

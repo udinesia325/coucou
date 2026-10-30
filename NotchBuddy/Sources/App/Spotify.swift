@@ -125,8 +125,10 @@ final class SpotifyController: ObservableObject {
 
     private func syncAppState() {
         let state = AppState.shared
-        if state.spotifyPlaying != isPlaying { state.spotifyPlaying = isPlaying }
-        let row = isPlaying && lyricInNotch
+        // Lyric line off: the island treats Spotify as not playing (idle Mochi, compact island times out).
+        let shown = isPlaying && lyricInNotch
+        if state.spotifyPlaying != shown { state.spotifyPlaying = shown }
+        let row = shown
         if state.spotifyLyricRow != row { state.spotifyLyricRow = row }
         // Lyrics drift: while playing, re-read Spotify's position every 10 s.
         if isPlaying, resyncTask == nil {
